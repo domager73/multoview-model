@@ -398,6 +398,13 @@ def _grid_fit(F, B, r, gamma=1e-4, restarts=3, seed=0, init=None):
     ctr = np.stack([(u[j] * B.xg[None, :]).sum(1) * B.dx for j in range(2)], 1)  # (r,2)
     return ctr, lam, th, best.x
 
+def _centers_from_th(th, B, d):
+    G = (B.Psi.T @ B.Psi) * B.dx; Ginv = np.linalg.pinv(G)
+    u = np.einsum("jmk,nk->jmn", np.einsum("ik,jmk->jmi", Ginv, th), B.Psi)
+    u = np.maximum(u, 0); u /= np.maximum(u.sum(2, keepdims=True) * B.dx, 1e-30)
+    return np.stack([(u[j] * B.xg[None, :]).sum(1) * B.dx for j in range(d)], 1)
+
+
 def run_video(cfg_json):
     cfg = json.loads(cfg_json)
     r = int(cfg.get("r", 2)); T = int(cfg.get("T", 12))
@@ -424,6 +431,21 @@ def run_video(cfg_json):
             if np.linalg.norm(rec_i[t, m] - pred) > thr:
                 rec_t[t, m] = pred
     # errors vs truth (match columns)
+    # optional hybrid (moment-init EM) centres
+    rec_h = None
+    if bool(cfg.get("hybrid", False)):
+        rec_h = np.zeros_like(ctrue)
+        for t in range(T):
+            rg = np.random.default_rng(t); p = F[t].reshape(-1); p = p / p.sum()
+            idx = rg.choice(p.size, size=min(2500, p.size), p=p)
+            ii, jj = np.unravel_index(idx, F[t].shape)
+            Xh = np.stack([B.xg[ii], B.xg[jj]], 1)
+            thh, lmh = em_from_moments(Xh, B, r, 2, 2, gamma=gamma, n_restarts=3, seed=t)
+            c = _centers_from_th(thh, B, 2)
+            if t > 0:
+                C = ((rec_h[t - 1][:, None, :] - c[None, :, :]) ** 2).sum(-1)
+                _, col = linear_sum_assignment(C); c = c[col]
+            rec_h[t] = c
     def err(a):
         e = []
         for t in range(T):
@@ -439,6 +461,7 @@ def run_video(cfg_json):
         "true": ctrue.tolist(),
         "rec_indep": rec_i.tolist(),
         "rec_temp": rec_t.tolist(),
+        "rec_hyb": (rec_h.tolist() if rec_h is not None else None),
         "err_indep": ei, "err_temp": et,
         "mean_indep": float(np.mean(ei)), "mean_temp": float(np.mean(et)),
     }
