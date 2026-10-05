@@ -20,5 +20,5 @@ EM и гибридом, показывает графики и метрики. �
 Сайт: https://<username>.github.io/multiview-playground/
 
 ## Что регулируется
-распределение (gauss/beta/heavy/uniform/laplace), размерность d, число компонент r,
+распределение (gauss/beta/skew-normal/heavy/uniform/laplace), размерность d, число компонент r,
 число шапок L, размер базиса K, объём выборки n, сглаживание gamma, контаминация eps, seed.

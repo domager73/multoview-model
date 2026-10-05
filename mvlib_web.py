@@ -57,6 +57,14 @@ def make_u_mix(B, kind, d, r, L, seed=0):
                 xi = rg.uniform(0.2, 0.8, L); sc = rg.uniform(0.03, 0.07, L)
                 raw = sum(w[l] * np.exp(-np.abs(xg - xi[l]) / sc[l]) / (2 * sc[l])
                           for l in range(L))
+            elif kind == "skew":
+                # asymmetric skew-normal kernels, alternating direction of skew
+                from scipy.stats import skewnorm
+                xi = np.sort(rg.uniform(0.2, 0.8, L)) if L > 1 else rg.uniform(0.3, 0.7, 1)
+                sc = rg.uniform(0.05, 0.12, L)
+                al = rg.uniform(3.0, 8.0, L) * np.where(np.arange(L) % 2 == 0, 1.0, -1.0)
+                raw = sum(w[l] * skewnorm.pdf(xg, al[l], loc=xi[l], scale=sc[l])
+                          for l in range(L))
             else:
                 raw = np.ones_like(xg)
             u[j, m] = raw / (raw.sum() * dx)
