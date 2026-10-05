@@ -284,8 +284,15 @@ def run_pipeline(cfg_json):
     th_a = np.stack([th[j][pm] for j in range(d)])
     lam_a = lm[pm]
 
-    # rebuild u_est from theta_est via basis expansion
-    u_est = np.einsum("jmk,nk->jmn", th_a, B.Psi)     # (d,r,N)
+    # rebuild u_est from theta_est via the dual (Gram) synthesis: with
+    # theta_i = <u, psi_i> and u = sum_k c_k psi_k we need c = G^{-1} theta,
+    # because psi_k are L1-normalised (heavily overlapping), not orthonormal.
+    G = (B.Psi.T @ B.Psi) * B.dx
+    Ginv = np.linalg.pinv(G)
+    coef = np.einsum("ik,jmk->jmi", Ginv, th_a)       # (d,r,K)
+    u_est = np.einsum("jmk,nk->jmn", coef, B.Psi)      # (d,r,N)
+    u_est = np.maximum(u_est, 0.0)
+    u_est /= np.maximum(u_est.sum(2, keepdims=True) * B.dx, 1e-30)
 
     # downsample everything to `grids` points for the browser
     ids = np.clip(np.round(np.linspace(0, 1, grids) * (B.N - 1)).astype(int), 0, B.N - 1)
