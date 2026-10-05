@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Multiview model playground</title>
+<style>
+  :root { --bg:#0f1220; --panel:#181c2e; --ink:#e8eaf6; --mut:#9aa0be; --acc:#6ea8fe; --ok:#3ddc97; --warn:#ff6b6b; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.45 -apple-system,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--ink); }
+  header { padding:16px 22px; border-bottom:1px solid #262b45; }
+  header h1 { margin:0; font-size:18px; }
+  header p { margin:4px 0 0; color:var(--mut); font-size:12.5px; }
+  .wrap { display:grid; grid-template-columns:320px 1fr; gap:16px; padding:16px; }
+  .panel { background:var(--panel); border:1px solid #262b45; border-radius:12px; padding:14px; }
+  label { display:block; margin:10px 0 4px; color:var(--mut); font-size:12px; }
+  select,input[type=number] { width:100%; padding:6px 8px; background:#0e1120; color:var(--ink); border:1px solid #333a5c; border-radius:8px; }
+  input[type=range] { width:100%; }
+  .row { display:flex; gap:8px; }
+  .row > div { flex:1; }
+  button { margin-top:14px; width:100%; padding:10px; border:0; border-radius:9px; background:var(--acc); color:#08111f; font-weight:600; cursor:pointer; }
+  button.sec { background:#2a3153; color:var(--ink); }
+  button:disabled { opacity:.5; cursor:default; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th,td { padding:5px 8px; text-align:right; border-bottom:1px solid #262b45; }
+  th:first-child,td:first-child { text-align:left; }
+  .best { color:var(--ok); font-weight:700; }
+  .chips span { display:inline-block; margin:2px 6px 2px 0; padding:3px 8px; border-radius:20px; background:#0e1120; border:1px solid #333a5c; font-size:12px; }
+  .warn { color:var(--warn); }
+  canvas { background:#0e1120; border-radius:10px; border:1px solid #262b45; width:100%; }
+  .grid3 { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  .muted { color:var(--mut); font-size:12px; }
+  .spin { color:var(--acc); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Multiview model: поиграться и сравнить с EM</h1>
+  <p>Модель <code>f(x)=&sum;<sub>m</sub> &lambda;<sub>m</sub> &prod;<sub>j</sub> u<sub>jm</sub>(x<sub>j</sub>)</code>.
+     Считается прямо в браузере (Pyodide: настоящие numpy/scipy). Метрика — относительная ошибка &theta; после выравнивания компонент.</p>
+</header>
+
+<div class="wrap">
+  <div class="panel" id="controls">
+    <label>Распределение (истинное)</label>
+    <select id="kind">
+      <option value="gauss">гауссово (верная спецификация)</option>
+      <option value="beta">бета (скос)</option>
+      <option value="heavy">тяжёлые хвосты (t, nu=2)</option>
+      <option value="uniform">равномерное</option>
+      <option value="laplace">Лаплас</option>
+    </select>
+    <div class="row">
+      <div><label>размерность d</label><select id="d"><option>2</option></select></div>
+      <div><label>компонент r</label><select id="r"><option>1</option><option selected>2</option><option>3</option></select></div>
+    </div>
+    <div class="row">
+      <div><label>шапок L в u<sub>jm</sub></label><select id="L"><option>1</option><option selected>2</option><option>3</option></select></div>
+      <div><label>базис K</label><select id="K"><option>8</option><option selected>10</option><option>12</option><option>14</option></select></div>
+    </div>
+    <label>выборка n = <b id="nv">4000</b></label>
+    <input type="range" id="n" min="500" max="20000" step="500" value="4000" />
+    <label>сглаживание γ = <b id="gv">1e-4</b></label>
+    <input type="range" id="gamma" min="-5" max="-2" step="0.1" value="-4" />
+    <label>контаминация ε = <b id="cv">0.00</b></label>
+    <input type="range" id="contam" min="0" max="0.3" step="0.01" value="0" />
+    <div class="row">
+      <div><label>seed данных</label><input type="number" id="seed" value="0" /></div>
+      <div><label>метод для графиков</label>
+        <select id="method"><option value="moments">моменты</option><option value="em">EM</option><option value="hybrid">гибрид</option></select>
+      </div>
+    </div>
+    <button id="run" disabled>▶ Считать (моменты / EM / гибрид)</button>
+    <button id="reroll" class="sec">🎲 Новая истина (seed+1)</button>
+    <div id="status" class="muted" style="margin-top:10px">Загрузка Pyodide…</div>
+  </div>
+
+  <div>
+    <div class="panel" style="margin-bottom:16px">
+      <div class="chips" id="info"></div>
+      <table id="metrics"><thead><tr><th>метод</th><th>rel θ</th><th>rel λ</th><th>время, с</th></tr></thead><tbody></tbody></table>
+      <div class="muted" id="interpret" style="margin-top:8px"></div>
+    </div>
+
+    <div class="panel" style="margin-bottom:16px">
+      <div class="muted" style="margin-bottom:6px">Компоненты u<sub>jm</sub>: истина (—) vs оценка (- -)</div>
+      <div class="grid3" id="compGrid"></div>
+    </div>
+
+    <div class="panel" style="margin-bottom:16px" id="densPanel">
+      <div class="muted" style="margin-bottom:6px">Плотность f(x₁,x₂): истина | восстановленная</div>
+      <div class="grid3">
+        <canvas id="cTrue" width="360" height="360"></canvas>
+        <canvas id="cEst" width="360" height="360"></canvas>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="muted" style="margin-bottom:6px">Коэффициенты: θ истина (x) против θ оценка (y); идеал — на диагонали</div>
+      <canvas id="cTheta" width="720" height="360"></canvas>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/pyodide/v0.26.2/full/pyodide.js"></script>
+<script>
+let pyodide = null;
+const $ = id => document.getElementById(id);
+const COLORS = ["#6ea8fe","#ffb454","#3ddc97","#e06cff","#ff6b6b","#59d0e0"];
+
+function logScale(v){ return Math.pow(10, parseFloat(v)); }
+function bindLabels(){
+  $("n").oninput = () => $("nv").textContent = $("n").value;
+  $("gamma").oninput = () => $("gv").textContent = logScale($("gamma").value).toExponential(0);
+  $("contam").oninput = () => $("cv").textContent = parseFloat($("contam").value).toFixed(2);
+}
+bindLabels();
+
+function cfg(){
+  return {
+    d: +$("d").value, r: +$("r").value, L: +$("L").value, K: +$("K").value,
+    n: +$("n").value, kind: $("kind").value, gamma: logScale($("gamma").value),
+    contam: +$("contam").value, seed: +$("seed").value, grid: 110,
+    method: $("method").value
+  };
+}
+
+async function initPy(){
+  pyodide = await loadPyodide({ indexURL: "https://cdn.jsdelivr.net/pyodide/v0.26.2/full/" });
+  $("status").textContent = "Загрузка numpy/scipy…";
+  await pyodide.loadPackage(["numpy","scipy"]);
+  const src = await (await fetch("mvlib_web.py")).text();
+  pyodide.FS.writeFile("mvlib_web.py", src);
+  await pyodide.runPythonAsync("import mvlib_web\ndef _run(s): return mvlib_web.run_pipeline(s)");
+  $("status").textContent = "Готово. Нажми «Считать».";
+  $("run").disabled = false;
+}
+
+async function run(){
+  $("run").disabled = true;
+  $("status").innerHTML = '<span class="spin">Считаю…</span>';
+  await new Promise(r => setTimeout(r, 20));
+  try {
+    const out = JSON.parse(pyodide.globals.get("_run")(JSON.stringify(cfg())).toString());
+    render(out);
+    $("status").textContent = "Готово.";
+  } catch(e) {
+    $("status").textContent = "Ошибка: " + e;
+  }
+  $("run").disabled = false;
+}
+
+function fmt(x){ return (x<1e3)? x.toFixed(4) : x.toFixed(0); }
+
+function render(out){
+  const m = out.metrics, info = out.info;
+  // metrics table
+  const names = {moments:"моменты", em:"EM", hybrid:"гибрид"};
+  let best = "moments";
+  for (const k in m) if (m[k].rel_theta < m[best].rel_theta) best = k;
+  const tb = $("metrics").querySelector("tbody"); tb.innerHTML = "";
+  for (const k of ["moments","em","hybrid"]){
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${names[k]}</td>
+      <td class="${k===best?'best':''}">${fmt(m[k].rel_theta)}</td>
+      <td>${fmt(m[k].rel_lam)}</td><td>${m[k].time.toFixed(2)}</td>`;
+    tb.appendChild(tr);
+  }
+  $("info").innerHTML =
+    `<span>d=${cfg().d} r=${cfg().r} L=${cfg().L} K=${cfg().K}</span>` +
+    `<span>моментов ${info.n_moments} / параметров ${info.n_params}</span>` +
+    `<span class="${info.ident_ok?'':'warn'}">идентифицируемость r≤${info.ident_bound.toFixed(2)} ${info.ident_ok?'✓':'✗'}</span>`;
+  const win = best==="moments" ? "моменты" : best;
+  $("interpret").innerHTML = (best==="em")
+    ? "Лучше EM — ожидаемо при верной спецификации и большом n."
+    : `Лучше <b>${win}</b>. На негауссовых и в трудных режимах моментный метод/гибрид выигрывают.`;
+
+  drawComponents(out.plot);
+  if (out.plot.f_true){ $("densPanel").style.display=""; drawHeat("cTrue", out.plot.f_true, out.plot.grid2); drawHeat("cEst", out.plot.f_est, out.plot.grid2); }
+  else { $("densPanel").style.display="none"; }
+  drawTheta(out.theta);
+}
+
+function drawComponents(p){
+  const grid = $("compGrid"); grid.innerHTML = "";
+  const d = p.u_true.length, r = p.u_true[0].length, x = p.x;
+  for (let j=0;j<d;j++){
+    const c = document.createElement("canvas"); c.width=360; c.height=220; grid.appendChild(c);
+    const ctx = c.getContext("2d"); ctx.clearRect(0,0,c.width,c.height);
+    let ymax = 1e-9;
+    for (let m=0;m<r;m++){ ymax = Math.max(ymax, ...p.u_true[j][m], ...p.u_est[j][m]); }
+    const M={l:36,r:8,t:14,b:24}, W=c.width-M.l-M.r, H=c.height-M.t-M.b;
+    const X = i => M.l + W*i/(x.length-1), Y = v => M.t + H*(1 - v/(ymax*1.1));
+    ctx.strokeStyle="#2a3153"; ctx.beginPath(); ctx.moveTo(M.l,M.t); ctx.lineTo(M.l,M.t+H); ctx.lineTo(M.l+W,M.t+H); ctx.stroke();
+    ctx.fillStyle="#9aa0be"; ctx.font="11px sans-serif"; ctx.fillText(`j=${j+1}`, M.l, 10);
+    for (let m=0;m<r;m++){
+      const col = COLORS[m%COLORS.length];
+      line(ctx, p.u_true[j][m], X, Y, col, 2, []);
+      line(ctx, p.u_est[j][m],  X, Y, col, 1.5, [5,4]);
+    }
+  }
+}
+function line(ctx, arr, X, Y, color, w, dash){
+  ctx.save(); ctx.setLineDash(dash); ctx.strokeStyle=color; ctx.lineWidth=w; ctx.beginPath();
+  arr.forEach((v,i)=>{ i?ctx.lineTo(X(i),Y(v)):ctx.moveTo(X(i),Y(v)); }); ctx.stroke(); ctx.restore();
+}
+
+function drawHeat(id, F, g){
+  const cv=$(id), ctx=cv.getContext("2d");
+  const n=F.length, img=ctx.createImageData(n,n);
+  let lo=Infinity, hi=-Infinity;
+  for (let i=0;i<n;i++) for (let j=0;j<n;j++){ lo=Math.min(lo,F[i][j]); hi=Math.max(hi,F[i][j]); }
+  for (let j=0;j<n;j++) for (let i=0;i<n;i++){
+    const t=(F[i][j]-lo)/(hi-lo+1e-12);
+    const [r_,g_,b_]=viridis(t);
+    const k=(j*n+i)*4; img.data[k]=r_; img.data[k+1]=g_; img.data[k+2]=b_; img.data[k+3]=255;
+  }
+  const tmp=document.createElement("canvas"); tmp.width=n; tmp.height=n; tmp.getContext("2d").putImageData(img,0,0);
+  ctx.clearRect(0,0,cv.width,cv.height); ctx.imageSmoothingEnabled=true;
+  ctx.drawImage(tmp,0,0,cv.width,cv.height);
+  ctx.fillStyle="#9aa0be"; ctx.font="11px sans-serif";
+  ctx.fillText(id==="cTrue"?"истина f":"оценка f̂", 12, 20);
+}
+function viridis(t){
+  const stops=[[68,1,84],[59,82,139],[33,145,140],[94,201,98],[253,231,37]];
+  const s=t*(stops.length-1), i=Math.min(stops.length-2,Math.floor(s)), f=s-i;
+  return [0,1,2].map(k=>Math.round(stops[i][k]+f*(stops[i+1][k]-stops[i][k])));
+}
+
+function drawTheta(p){
+  const cv=$("cTheta"), ctx=cv.getContext("2d"), W=cv.width, H=cv.height, M=40;
+  ctx.clearRect(0,0,W,H);
+  let lo=Infinity, hi=-Infinity;
+  p.true.forEach((v,i)=>{ lo=Math.min(lo,v,p.est[i]); hi=Math.max(hi,v,p.est[i]); });
+  const X=v=>M+(W-2*M)*(v-lo)/(hi-lo+1e-12), Y=v=>H-M-(H-2*M)*(v-lo)/(hi-lo+1e-12);
+  ctx.strokeStyle="#333a5c"; ctx.beginPath(); ctx.moveTo(X(lo),Y(lo)); ctx.lineTo(X(hi),Y(hi)); ctx.stroke();
+  ctx.fillStyle="#6ea8fe";
+  p.true.forEach((v,i)=>{ ctx.beginPath(); ctx.arc(X(v),Y(p.est[i]),3,0,7); ctx.fill(); });
+  ctx.fillStyle="#9aa0be"; ctx.font="11px sans-serif";
+  ctx.fillText("θ истина →", W/2, H-8); ctx.save(); ctx.translate(12,H/2); ctx.rotate(-Math.PI/2); ctx.fillText("θ оценка →",0,0); ctx.restore();
+}
+
+$("run").onclick = run;
+$("reroll").onclick = () => { $("seed").value = +$("seed").value + 1; run(); };
+initPy();
+</script>
+</body>
+</html>
