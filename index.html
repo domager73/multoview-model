@@ -164,11 +164,11 @@ function fmt(x){ return (x<1e3)? x.toFixed(4) : x.toFixed(0); }
 function render(out){
   const m = out.metrics, info = out.info;
   // metrics table
-  const names = {moments:"моменты", em:"EM", hybrid:"гибрид"};
+  const names = {baseline:"моменты γ=0 (старт)", moments:"моменты γ=1e-4", em:"EM обычный", hybrid:"гибрид"};
   let best = "moments";
   for (const k in m) if (m[k].rel_theta < m[best].rel_theta) best = k;
   const tb = $("metrics").querySelector("tbody"); tb.innerHTML = "";
-  for (const k of ["moments","em","hybrid"]){
+  for (const k of ["baseline","moments","em","hybrid"]){
     const tr = document.createElement("tr");
     tr.innerHTML = `<td>${names[k]}</td>
       <td class="${k===best?'best':''}">${fmt(m[k].rel_theta)}</td>
@@ -182,7 +182,7 @@ function render(out){
   const win = best==="moments" ? "моменты" : best;
   $("interpret").innerHTML = (best==="em")
     ? "Лучше EM — ожидаемо при верной спецификации и большом n."
-    : `Лучше <b>${win}</b>. На негауссовых и в трудных режимах моментный метод/гибрид выигрывают.`;
+    : `Лучше <b>${names[best]}</b> — как правило, в трудных/негауссовых режимах.`;
 
   drawComponents(out.plot);
   if (out.plot.f_true){ $("densPanel").style.display=""; drawHeat("cTrue", out.plot.f_true, out.plot.grid2); drawHeat("cEst", out.plot.f_est, out.plot.grid2); }

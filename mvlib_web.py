@@ -273,9 +273,11 @@ def run_pipeline(cfg_json):
 
     import time
     results = {}
+    t0 = time.time(); th_b, lm_b = moments_theta(X, B, r, d, 0.0, 5, seed); t_b = time.time() - t0
     t0 = time.time(); th_m, lm_m = moments_theta(X, B, r, d, gamma, 5, seed); t_m = time.time() - t0
     t0 = time.time(); th_e, lm_e = em_fit(X, B, r, L, d, 4, seed); t_e = time.time() - t0
     t0 = time.time(); th_h, lm_h = em_from_moments(X, B, r, L, d, gamma, 5, seed); t_h = time.time() - t0
+    results["baseline"] = (th_b, lm_b, t_b)
     results["moments"] = (th_m, lm_m, t_m)
     results["em"] = (th_e, lm_e, t_e)
     results["hybrid"] = (th_h, lm_h, t_h)
