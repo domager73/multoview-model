@@ -135,7 +135,7 @@
         <button id="v3play" class="sec" style="max-width:120px">⏸ / ▶</button>
       </div>
       <div class="row" style="align-items:end; margin-top:4px">
-        <div><label>вид</label><select id="v3mode"><option value="cloud">облако точек</option><option value="bodies">тела (полупрозрачные)</option></select></div>
+        <div><label>вид</label><select id="v3mode"><option value="points">точки (центры + траектории)</option><option value="cloud">облако точек</option><option value="bodies">тела (полупрозрачные)</option></select></div>
         <div><label>авто-облёт</label><input type="checkbox" id="v3orbit"></div>
       </div>
       <div id="v3status" class="muted" style="margin:8px 0">3D-видео ещё не запускалось.</div>
@@ -358,6 +358,15 @@ function draw3D(t){
     const pts=VID3.cloud[t].map(p=>{const q=proj3(p); return {x:cx+q[0]*sc, y:cy-q[1]*sc, z:q[2], w:p[3]};});
     pts.sort((a,b)=>a.z-b.z);
     for(const q of pts){ const r=1.0+3.4*q.w; ctx.fillStyle="rgba(120,180,255,"+(0.05+0.55*q.w)+")"; ctx.beginPath(); ctx.arc(q.x,q.y,r,0,7); ctx.fill(); }
+  } else if($("v3mode").value==="points"){
+    for(let m=0;m<VID3.r;m++){
+      const col=COLORS[m%COLORS.length];
+      ctx.strokeStyle=hexA(col,0.35); ctx.lineWidth=1; ctx.setLineDash([]);
+      ctx.beginPath(); for(let tt=0;tt<VID3.T;tt++){const q=proj3(VID3.true[tt][m]); const x=cx+q[0]*sc,y=cy-q[1]*sc; tt?ctx.lineTo(x,y):ctx.moveTo(x,y);} ctx.stroke();
+      ctx.strokeStyle=hexA(col,0.55); ctx.setLineDash([3,3]);
+      ctx.beginPath(); for(let tt=0;tt<VID3.T;tt++){const q=proj3(VID3.rec_temp[tt][m]); const x=cx+q[0]*sc,y=cy-q[1]*sc; tt?ctx.lineTo(x,y):ctx.moveTo(x,y);} ctx.stroke();
+      ctx.setLineDash([]);
+    }
   } else {
     const bl=[]; for(let m=0;m<VID3.r;m++){const q=proj3(VID3.rec_temp[t][m]); bl.push({m:m,z:q[2],x:cx+q[0]*sc,y:cy-q[1]*sc});}
     bl.sort((a,b)=>a.z-b.z);
