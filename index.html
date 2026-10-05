@@ -122,6 +122,27 @@
       <input type="range" id="vidSlider" min="0" max="0" value="0" style="margin-top:8px" />
     </div>
 
+    <div class="panel" style="margin-bottom:16px">
+      <div class="muted" style="margin-bottom:6px">3D-видео: тела движутся в 3D. Проекции XY / XZ / YZ. ◯ истина · ✚ temporal; линии — истинные (—) и восстановленные (- -) траектории.</div>
+      <div class="row" style="align-items:end; flex-wrap:wrap">
+        <div><label>тел r</label><select id="v3r"><option>2</option><option>3</option></select></div>
+        <div><label>кадров T</label><input type="number" id="v3T" value="8" min="5" max="16"></div>
+        <div><label>ширина σ</label><input type="range" id="v3sig" min="0.04" max="0.1" step="0.005" value="0.07"></div>
+        <div><label>seed</label><input type="number" id="v3seed" value="0"></div>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <button id="v3run" style="max-width:240px">▶ Запустить 3D видео</button>
+        <button id="v3play" class="sec" style="max-width:120px">⏸ / ▶</button>
+      </div>
+      <div id="v3status" class="muted" style="margin:8px 0">3D-видео ещё не запускалось.</div>
+      <div style="display:flex; gap:10px; flex-wrap:wrap">
+        <canvas id="cXY" width="300" height="300"></canvas>
+        <canvas id="cXZ" width="300" height="300"></canvas>
+        <canvas id="cYZ" width="300" height="300"></canvas>
+      </div>
+      <input type="range" id="v3slider" min="0" max="0" value="0" style="margin-top:8px" />
+    </div>
+
     <div class="panel">
       <div class="muted" style="margin-bottom:6px">Коэффициенты: θ истина (x) против θ оценка (y); идеал — на диагонали</div>
       <canvas id="cTheta" width="720" height="360"></canvas>
@@ -158,7 +179,7 @@ async function initPy(){
   await pyodide.loadPackage(["numpy","scipy"]);
   const src = await (await fetch("mvlib_web.py")).text();
   pyodide.FS.writeFile("mvlib_web.py", src);
-  await pyodide.runPythonAsync("import mvlib_web\ndef _run(s): return mvlib_web.run_pipeline(s)\ndef _run_video(s): return mvlib_web.run_video(s)");
+  await pyodide.runPythonAsync("import mvlib_web\ndef _run(s): return mvlib_web.run_pipeline(s)\ndef _run_video(s): return mvlib_web.run_video(s)\ndef _run_video3d(s): return mvlib_web.run_video3d(s)");
   $("status").textContent = "Готово. Нажми «Считать».";
   $("run").disabled = false;
 }
@@ -310,6 +331,51 @@ async function runVideo(){
 $("vidRun").onclick = runVideo;
 $("vidPlay").onclick = () => { vidTimer ? stopPlay() : startPlay(); };
 $("vidSlider").oninput = () => { stopPlay(); drawVideo(+$("vidSlider").value); };
+
+let VID3=null, v3t=0, v3timer=null;
+const PLANES=["cXY","cXZ","cYZ"], HVI=[[0,1],[0,2],[1,2]], PLN=["XY","XZ","YZ"];
+function drawVid3d(t){
+  if(!VID3) return; v3t=t;
+  for(let p=0;p<3;p++){
+    const cv=$(PLANES[p]), ctx=cv.getContext("2d"), F=VID3.proj[t][p], n=F.length, Pc=cv.width;
+    const img=ctx.createImageData(n,n); let lo=Infinity,hi=-Infinity;
+    for(let a=0;a<n;a++)for(let b=0;b<n;b++){lo=Math.min(lo,F[a][b]);hi=Math.max(hi,F[a][b]);}
+    for(let j=0;j<n;j++)for(let a=0;a<n;a++){const c=viridis((F[a][n-1-j]-lo)/(hi-lo+1e-12));const k=(j*n+a)*4;
+      img.data[k]=c[0];img.data[k+1]=c[1];img.data[k+2]=c[2];img.data[k+3]=255;}
+    const tmp=document.createElement("canvas");tmp.width=n;tmp.height=n;tmp.getContext("2d").putImageData(img,0,0);
+    ctx.imageSmoothingEnabled=true; ctx.clearRect(0,0,Pc,Pc); ctx.drawImage(tmp,0,0,Pc,Pc);
+    const hi_=HVI[p][0], vi_=HVI[p][1], X=v=>v*Pc, Y=v=>(1-v)*Pc;
+    for(let m=0;m<VID3.r;m++){
+      const col=COLORS[m%COLORS.length];
+      ctx.strokeStyle=col; ctx.lineWidth=2; ctx.setLineDash([]); ctx.globalAlpha=1;
+      ctx.beginPath(); for(let tt=0;tt<VID3.T;tt++){const q=VID3.true[tt][m];const x=X(q[hi_]),y=Y(q[vi_]);tt?ctx.lineTo(x,y):ctx.moveTo(x,y);} ctx.stroke();
+      ctx.strokeStyle=col; ctx.lineWidth=1.5; ctx.setLineDash([4,4]); ctx.globalAlpha=.85;
+      ctx.beginPath(); for(let tt=0;tt<VID3.T;tt++){const q=VID3.rec_temp[tt][m];const x=X(q[hi_]),y=Y(q[vi_]);tt?ctx.lineTo(x,y):ctx.moveTo(x,y);} ctx.stroke();
+      ctx.setLineDash([]); ctx.globalAlpha=1;
+      const qt=VID3.true[t][m], qr=VID3.rec_temp[t][m];
+      ctx.strokeStyle="#ffffff"; ctx.beginPath(); ctx.arc(X(qt[hi_]),Y(qt[vi_]),5,0,7); ctx.stroke();
+      const rx=X(qr[hi_]),ry=Y(qr[vi_]); ctx.strokeStyle="#ff5555"; ctx.beginPath();
+      ctx.moveTo(rx-6,ry);ctx.lineTo(rx+6,ry);ctx.moveTo(rx,ry-6);ctx.lineTo(rx,ry+6);ctx.stroke();
+    }
+    ctx.fillStyle="#e8eaf6"; ctx.font="12px sans-serif"; ctx.fillText(PLN[p]+"  кадр "+(t+1)+"/"+VID3.T,8,16);
+  }
+}
+function stopVid3d(){ if(v3timer){clearInterval(v3timer);v3timer=null;} }
+function startVid3d(){ stopVid3d(); v3timer=setInterval(()=>{let t=(v3t+1)%VID3.T; drawVid3d(t); $("v3slider").value=t;},400); }
+async function runVideo3d(){
+  $("v3run").disabled=true; $("v3status").innerHTML='<span class="spin">Считаю 3D-кадры…</span>';
+  await new Promise(r=>setTimeout(r,20));
+  try{
+    const cfg={r:+$("v3r").value,T:+$("v3T").value,sigma:+$("v3sig").value,seed:+$("v3seed").value,K:8,N:30,P:28};
+    VID3=JSON.parse(pyodide.globals.get("_run_video3d")(JSON.stringify(cfg)).toString());
+    v3t=0; $("v3slider").max=VID3.T-1; $("v3slider").value=0; drawVid3d(0); startVid3d();
+    $("v3status").innerHTML="кадров "+VID3.T+": ошибка трекинга — independent "+VID3.mean_indep.toFixed(3)+", <b>temporal "+VID3.mean_temp.toFixed(3)+"</b>";
+  }catch(e){ $("v3status").textContent="Ошибка: "+e; }
+  $("v3run").disabled=false;
+}
+$("v3run").onclick=runVideo3d;
+$("v3play").onclick=()=>{ v3timer?stopVid3d():startVid3d(); };
+$("v3slider").oninput=()=>{ stopVid3d(); drawVid3d(+$("v3slider").value); };
 const PRESETS = {
   gauss:  { kind:"gauss", r:2, L:2, K:10, n:8000, gamma:-4, contam:0 },
   beta:   { kind:"beta",  r:2, L:2, K:10, n:3000, gamma:-4, contam:0 },

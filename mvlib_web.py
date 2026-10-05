@@ -443,3 +443,126 @@ def run_video(cfg_json):
         "mean_indep": float(np.mean(ei)), "mean_temp": float(np.mean(et)),
     }
     return json.dumps(out)
+
+
+# --------------------------------------------------------------------------- #
+# 3D video mode: bodies moving in 3D, decomposed frame-by-frame (d=3)
+# --------------------------------------------------------------------------- #
+def _make_video3d(B, r, T, sigma, seed):
+    p0 = np.array([[0.25, 0.25, 0.25], [0.75, 0.70, 0.30], [0.30, 0.75, 0.70]])[:r]
+    p1 = np.array([[0.30, 0.70, 0.75], [0.70, 0.30, 0.70], [0.70, 0.30, 0.30]])[:r]
+    lam = np.full(r, 1.0 / r)
+    N = B.N
+    F = np.zeros((T, N, N, N)); ctr = np.zeros((T, r, 3))
+    g = lambda v, c: np.exp(-(v - c) ** 2 / (2 * sigma ** 2))
+    for t in range(T):
+        a = t / (T - 1)
+        for m in range(r):
+            c = (1 - a) * p0[m] + a * p1[m]; ctr[t, m] = c
+            u = g(B.xg, c[0]) / (sigma * SQRT2PI)
+            v = g(B.xg, c[1]) / (sigma * SQRT2PI)
+            w = g(B.xg, c[2]) / (sigma * SQRT2PI)
+            F[t] += lam[m] * np.einsum("a,b,c->abc", u, v, w)
+        F[t] /= F[t].sum() * B.dx ** 3
+    return F, ctr
+
+
+def _grid_fit3d(F, B, r, gamma=1e-4, restarts=3, seed=0):
+    K = B.K; d = 3
+    Zl = [(B.Psi * (F.sum((1, 2)) * B.dx * B.dx)[:, None]).sum(0) * B.dx,
+          (B.Psi * (F.sum((0, 2)) * B.dx * B.dx)[:, None]).sum(0) * B.dx,
+          (B.Psi * (F.sum((0, 1)) * B.dx * B.dx)[:, None]).sum(0) * B.dx]
+    Zp = {(0, 1): (B.Psi.T @ F.sum(2) @ B.Psi) * B.dx ** 3,
+          (0, 2): (B.Psi.T @ F.sum(1) @ B.Psi) * B.dx ** 3,
+          (1, 2): (B.Psi.T @ F.sum(0) @ B.Psi) * B.dx ** 3}
+    Zt = np.einsum("ak,bl,cm,abc->klm", B.Psi, B.Psi, B.Psi, F) * B.dx ** 3
+    pairs = list(Zp.keys())
+    S = np.zeros((K - 2, K))
+    for i in range(K - 2):
+        S[i, i], S[i, i + 1], S[i, i + 2] = 1.0, -2.0, 1.0
+
+    def fg(p):
+        th = p[:d * r * K].reshape(d, r, K); lam = p[d * r * K:d * r * K + r]
+        Gl = [lam @ th[j] for j in range(d)]
+        Gp = {pr: np.einsum("m,mk,ml->kl", lam, th[pr[0]], th[pr[1]]) for pr in pairs}
+        Gt = np.einsum("m,ma,mb,mc->abc", lam, th[0], th[1], th[2])
+        Rl = [Gl[j] - Zl[j] for j in range(d)]
+        Rp = {pr: Gp[pr] - Zp[pr] for pr in pairs}; Rt = Gt - Zt
+        val = 0.5 * sum(float(a @ a) for a in Rl) + 0.5 * sum(float((Rp[pr] ** 2).sum()) for pr in pairs) \
+            + 0.5 * float((Rt ** 2).sum())
+        if gamma > 0:
+            val += 0.5 * gamma * sum(float(np.sum((S @ th[j].T) ** 2)) for j in range(d))
+        gth = np.zeros((d, r, K)); glm = np.zeros(r)
+        for j in range(d):
+            gth[j] += lam[:, None] * Rl[j][None, :]; glm += th[j] @ Rl[j]
+            if gamma > 0:
+                gth[j] += gamma * (S.T @ (S @ th[j].T)).T
+        for pr in pairs:
+            R = Rp[pr]
+            gth[pr[0]] += lam[:, None] * (th[pr[1]] @ R.T)
+            gth[pr[1]] += lam[:, None] * (th[pr[0]] @ R)
+            glm += np.einsum("mk,kl,ml->m", th[pr[0]], R, th[pr[1]])
+        gth[0] += lam[:, None] * np.einsum("abc,mb,mc->ma", Rt, th[1], th[2])
+        gth[1] += lam[:, None] * np.einsum("abc,ma,mc->mb", Rt, th[0], th[2])
+        gth[2] += lam[:, None] * np.einsum("abc,ma,mb->mc", Rt, th[0], th[1])
+        glm += np.einsum("abc,ma,mb,mc->m", Rt, th[0], th[1], th[2])
+        return val, np.concatenate([gth.ravel(), glm])
+
+    ts = d * r * K; ub = np.tile(1.0 / B.C_k, d * r)
+    bnds = [(0.0, ub[i]) for i in range(ts)] + [(0.0, 1.0)] * r
+    cons = [{"type": "eq", "fun": lambda p: p[ts:ts + r].sum() - 1.0,
+             "jac": lambda p: np.r_[np.zeros(ts), np.ones(r)]}]
+    rg = np.random.default_rng(seed); best = None
+    for _ in range(restarts):
+        p0 = np.r_[np.clip(np.abs(rg.standard_normal(ts)) * 0.4 + 0.2, 0, ub), np.full(r, 1.0 / r)]
+        res = minimize(fg, p0, jac=True, method="SLSQP", bounds=bnds, constraints=cons,
+                       options={"maxiter": 3000, "ftol": 1e-12})
+        if best is None or res.fun < best.fun:
+            best = res
+    th = best.x[:ts].reshape(d, r, K); lam = np.clip(best.x[ts:ts + r], 1e-12, None); lam /= lam.sum()
+    G = (B.Psi.T @ B.Psi) * B.dx; Ginv = np.linalg.pinv(G)
+    u = np.einsum("jmk,nk->jmn", np.einsum("ik,jmk->jmi", Ginv, th), B.Psi)
+    u = np.maximum(u, 0); u /= np.maximum(u.sum(2, keepdims=True) * B.dx, 1e-30)
+    ctr = np.stack([(u[j] * B.xg[None, :]).sum(1) * B.dx for j in range(d)], 1)  # (r,3)
+    return ctr
+
+
+def run_video3d(cfg_json):
+    cfg = json.loads(cfg_json)
+    r = int(cfg.get("r", 2)); T = int(cfg.get("T", 10)); sigma = float(cfg.get("sigma", 0.07))
+    seed = int(cfg.get("seed", 0)); K = int(cfg.get("K", 8)); N = int(cfg.get("N", 30))
+    gamma = float(cfg.get("gamma", 1e-4))
+    B = Basis(K=K, N=N)
+    F, ctrue = _make_video3d(B, r, T, sigma, seed)
+    rec = np.zeros_like(ctrue)
+    for t in range(T):
+        ctr = _grid_fit3d(F[t], B, r, gamma=gamma, restarts=3, seed=t)
+        if t > 0:
+            C = ((rec[t - 1][:, None, :] - ctr[None, :, :]) ** 2).sum(-1)
+            rs, cs = linear_sum_assignment(C); ctr = ctr[cs]
+        rec[t] = ctr
+    # temporal repair in 3D
+    rec_t = rec.copy()
+    for m in range(r):
+        for t in range(1, T - 1):
+            pred = 0.5 * (rec[t - 1, m] + rec[t + 1, m])
+            if np.linalg.norm(rec[t, m] - pred) > 0.6 * sigma:
+                rec_t[t, m] = pred
+    # projected densities per frame (xy, xz, yz), downsampled
+    P = int(cfg.get("P", 32)); ids = np.clip(np.round(np.linspace(0, N - 1, P)).astype(int), 0, N - 1)
+    proj = []
+    for t in range(T):
+        xy = F[t].sum(2); xz = F[t].sum(1); yz = F[t].sum(0)
+        proj.append([xy[np.ix_(ids, ids)].tolist(), xz[np.ix_(ids, ids)].tolist(), yz[np.ix_(ids, ids)].tolist()])
+    def err(a):
+        e = []
+        for t in range(T):
+            C = ((ctrue[t][:, None, :] - a[t][None, :, :]) ** 2).sum(-1)
+            rs, cs = linear_sum_assignment(C); e.append(float(np.sqrt(C[rs, cs]).mean()))
+        return e
+    ei, et = err(rec), err(rec_t)
+    out = {"r": r, "T": T, "P": P, "true": ctrue.tolist(),
+           "rec_indep": rec.tolist(), "rec_temp": rec_t.tolist(),
+           "proj": proj, "err_indep": ei, "err_temp": et,
+           "mean_indep": float(np.mean(ei)), "mean_temp": float(np.mean(et))}
+    return json.dumps(out)
