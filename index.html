@@ -119,6 +119,7 @@
         <button id="vidPlay" class="sec" style="max-width:120px">⏸ / ▶</button>
       </div>
       <div id="vidStatus" class="muted" style="margin:8px 0">Видео ещё не запускалось.</div>
+      <div class="muted" style="margin-bottom:6px">⚠ идентифицируемость: нужно K ≥ 4r+1 (иначе тела сливаются). Здесь K=16 → до 3 тел.</div>
       <canvas id="cVideo" width="420" height="420"></canvas>
       <input type="range" id="vidSlider" min="0" max="0" value="0" style="margin-top:8px" />
     </div>
@@ -140,6 +141,7 @@
         <div><label>авто-облёт</label><input type="checkbox" id="v3orbit"></div>
       </div>
       <div id="v3status" class="muted" style="margin:8px 0">3D-видео ещё не запускалось.</div>
+      <div class="muted" style="margin-bottom:6px">⚠ идентифицируемость (3D): (d−1)(K−1)/4 = 3.5 → до 3 тел при K=8.</div>
       <div class="muted" style="margin-bottom:4px">3D-сцена: тяни мышью, чтобы вращать; колесо — зум</div>
       <canvas id="c3d" width="620" height="440" style="cursor:grab; width:100%; max-width:620px"></canvas>
       <input type="range" id="v3slider" min="0" max="0" value="0" style="margin-top:8px" />
