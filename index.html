@@ -135,7 +135,9 @@
         <button id="v3play" class="sec" style="max-width:120px">⏸ / ▶</button>
       </div>
       <div id="v3status" class="muted" style="margin:8px 0">3D-видео ещё не запускалось.</div>
-      <div style="display:flex; gap:10px; flex-wrap:wrap">
+      <div class="muted" style="margin-bottom:4px">3D-сцена: тяни мышью, чтобы вращать; колесо — зум</div>
+      <canvas id="c3d" width="620" height="440" style="cursor:grab; width:100%; max-width:620px"></canvas>
+      <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:10px">
         <canvas id="cXY" width="300" height="300"></canvas>
         <canvas id="cXZ" width="300" height="300"></canvas>
         <canvas id="cYZ" width="300" height="300"></canvas>
@@ -359,7 +361,41 @@ function drawVid3d(t){
     }
     ctx.fillStyle="#e8eaf6"; ctx.font="12px sans-serif"; ctx.fillText(PLN[p]+"  кадр "+(t+1)+"/"+VID3.T,8,16);
   }
+  draw3D(t);
 }
+let yaw3=-0.7, pitch3=0.5, zoom3=1, drag3=null;
+function proj3(p){
+  const x=p[0]-0.5, y=p[1]-0.5, z=p[2]-0.5;
+  const cy=Math.cos(yaw3), sy=Math.sin(yaw3);
+  const X=cy*x-sy*y, Y1=sy*x+cy*y, Z1=z;
+  const cp=Math.cos(pitch3), sp=Math.sin(pitch3);
+  const Y2=cp*Y1-sp*Z1, Z2=sp*Y1+cp*Z1;
+  return [X,Y2,Z2];
+}
+function draw3D(t){
+  if(!VID3) return;
+  const cv=$("c3d"), ctx=cv.getContext("2d"), W=cv.width, H=cv.height, cx=W/2, cy=H/2, sc=Math.min(W,H)*0.82*zoom3;
+  ctx.clearRect(0,0,W,H);
+  const corners=[]; for(let a=0;a<2;a++)for(let b=0;b<2;b++)for(let c=0;c<2;c++)corners.push([a,b,c]);
+  const sc2=corners.map(p=>{const q=proj3(p); return [cx+q[0]*sc, cy-q[1]*sc];});
+  const edges=[[0,1],[0,2],[0,4],[1,3],[1,5],[2,3],[2,6],[3,7],[4,5],[4,6],[5,7],[6,7]];
+  ctx.strokeStyle="#2a3153"; ctx.lineWidth=1;
+  for(const e of edges){ctx.beginPath();ctx.moveTo(sc2[e[0]][0],sc2[e[0]][1]);ctx.lineTo(sc2[e[1]][0],sc2[e[1]][1]);ctx.stroke();}
+  const pts=VID3.cloud[t].map(p=>{const q=proj3(p); return {x:cx+q[0]*sc, y:cy-q[1]*sc, z:q[2], w:p[3]};});
+  pts.sort((a,b)=>a.z-b.z);
+  for(const q of pts){ const r=1.0+3.4*q.w; ctx.fillStyle="rgba(120,180,255,"+(0.05+0.55*q.w)+")"; ctx.beginPath(); ctx.arc(q.x,q.y,r,0,7); ctx.fill(); }
+  for(let m=0;m<VID3.r;m++){
+    const a=proj3(VID3.true[t][m]); ctx.strokeStyle="#ffffff"; ctx.beginPath(); ctx.arc(cx+a[0]*sc,cy-a[1]*sc,6,0,7); ctx.stroke();
+    const b=proj3(VID3.rec_temp[t][m]); const bx=cx+b[0]*sc, by=cy-b[1]*sc;
+    ctx.strokeStyle="#ff5555"; ctx.beginPath(); ctx.moveTo(bx-6,by);ctx.lineTo(bx+6,by);ctx.moveTo(bx,by-6);ctx.lineTo(bx,by+6); ctx.stroke();
+  }
+  ctx.fillStyle="#e8eaf6"; ctx.font="12px sans-serif"; ctx.fillText("3D-сцена, кадр "+(t+1)+"/"+VID3.T, 8, 16);
+}
+const c3=$("c3d");
+c3.addEventListener("mousedown",e=>{drag3={x:e.clientX,y:e.clientY}; c3.style.cursor="grabbing";});
+window.addEventListener("mousemove",e=>{ if(!drag3) return; yaw3+=(e.clientX-drag3.x)*0.01; pitch3=Math.max(-1.4,Math.min(1.4,pitch3+(e.clientY-drag3.y)*0.01)); drag3={x:e.clientX,y:e.clientY}; draw3D(v3t); });
+window.addEventListener("mouseup",()=>{ drag3=null; c3.style.cursor="grab"; });
+c3.addEventListener("wheel",e=>{ e.preventDefault(); zoom3=Math.max(0.4,Math.min(3,zoom3*Math.exp(-e.deltaY*0.001))); draw3D(v3t); },{passive:false});
 function stopVid3d(){ if(v3timer){clearInterval(v3timer);v3timer=null;} }
 function startVid3d(){ stopVid3d(); v3timer=setInterval(()=>{let t=(v3t+1)%VID3.T; drawVid3d(t); $("v3slider").value=t;},400); }
 async function runVideo3d(){

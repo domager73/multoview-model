@@ -561,8 +561,18 @@ def run_video3d(cfg_json):
             rs, cs = linear_sum_assignment(C); e.append(float(np.sqrt(C[rs, cs]).mean()))
         return e
     ei, et = err(rec), err(rec_t)
+    # 3D point cloud per frame (weighted sample of the voxel density) for volume view
+    M = int(cfg.get("M", 650)); rng = np.random.default_rng(7)
+    cloud = []
+    for t in range(T):
+        p = F[t].reshape(-1); p = p / p.sum()
+        idx = rng.choice(p.size, size=min(M, p.size), replace=False, p=p)
+        ii, jj, kk = np.unravel_index(idx, (N, N, N))
+        wt = p[idx] / p[idx].max()
+        pts = np.stack([B.xg[ii], B.xg[jj], B.xg[kk], wt], 1).round(4)
+        cloud.append(pts.tolist())
     out = {"r": r, "T": T, "P": P, "true": ctrue.tolist(),
            "rec_indep": rec.tolist(), "rec_temp": rec_t.tolist(),
-           "proj": proj, "err_indep": ei, "err_temp": et,
+           "proj": proj, "cloud": cloud, "err_indep": ei, "err_temp": et,
            "mean_indep": float(np.mean(ei)), "mean_temp": float(np.mean(et))}
     return json.dumps(out)
