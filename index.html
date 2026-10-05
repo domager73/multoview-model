@@ -104,6 +104,24 @@
       </div>
     </div>
 
+    <div class="panel" style="margin-bottom:16px">
+      <div class="muted" style="margin-bottom:6px">Видео: движущиеся тела — ◯ истина · ✚ temporal · ✕ independent</div>
+      <div class="row" style="align-items:end; flex-wrap:wrap">
+        <div><label>тел r</label><select id="vr"><option>2</option><option>3</option></select></div>
+        <div><label>кадров T</label><input type="number" id="vT" value="12" min="6" max="24"></div>
+        <div><label>ширина σ</label><input type="range" id="vsig" min="0.03" max="0.09" step="0.005" value="0.055"></div>
+        <div><label>seed</label><input type="number" id="vseed" value="1"></div>
+        <div><label>пересечение</label><input type="checkbox" id="vcross" checked></div>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <button id="vidRun" style="max-width:220px">▶ Запустить видео</button>
+        <button id="vidPlay" class="sec" style="max-width:120px">⏸ / ▶</button>
+      </div>
+      <div id="vidStatus" class="muted" style="margin:8px 0">Видео ещё не запускалось.</div>
+      <canvas id="cVideo" width="420" height="420"></canvas>
+      <input type="range" id="vidSlider" min="0" max="0" value="0" style="margin-top:8px" />
+    </div>
+
     <div class="panel">
       <div class="muted" style="margin-bottom:6px">Коэффициенты: θ истина (x) против θ оценка (y); идеал — на диагонали</div>
       <canvas id="cTheta" width="720" height="360"></canvas>
@@ -140,7 +158,7 @@ async function initPy(){
   await pyodide.loadPackage(["numpy","scipy"]);
   const src = await (await fetch("mvlib_web.py")).text();
   pyodide.FS.writeFile("mvlib_web.py", src);
-  await pyodide.runPythonAsync("import mvlib_web\ndef _run(s): return mvlib_web.run_pipeline(s)");
+  await pyodide.runPythonAsync("import mvlib_web\ndef _run(s): return mvlib_web.run_pipeline(s)\ndef _run_video(s): return mvlib_web.run_video(s)");
   $("status").textContent = "Готово. Нажми «Считать».";
   $("run").disabled = false;
 }
@@ -252,6 +270,46 @@ function drawTheta(p){
 $("run").onclick = run;
 $("reroll").onclick = () => { $("seed").value = +$("seed").value + 1; run(); };
 
+let VID=null, vidT=0, vidTimer=null;
+function drawVideo(t){
+  if(!VID) return; vidT=t;
+  const cv=$("cVideo"), ctx=cv.getContext("2d"), F=VID.frames[t], n=F.length, P=cv.width;
+  const img=ctx.createImageData(n,n); let lo=Infinity,hi=-Infinity;
+  for(let i=0;i<n;i++)for(let j=0;j<n;j++){lo=Math.min(lo,F[i][j]);hi=Math.max(hi,F[i][j]);}
+  for(let j=0;j<n;j++)for(let i=0;i<n;i++){const c=viridis((F[i][j]-lo)/(hi-lo+1e-12));const k=(j*n+i)*4;
+    img.data[k]=c[0];img.data[k+1]=c[1];img.data[k+2]=c[2];img.data[k+3]=255;}
+  const tmp=document.createElement("canvas");tmp.width=n;tmp.height=n;tmp.getContext("2d").putImageData(img,0,0);
+  ctx.imageSmoothingEnabled=true; ctx.clearRect(0,0,P,P); ctx.drawImage(tmp,0,0,P,P);
+  const X=v=>v*P, Y=v=>(1-v)*P;
+  for(let m=0;m<VID.r;m++){
+    ctx.strokeStyle="#ffffff"; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.arc(X(VID.true[t][m][0]),Y(VID.true[t][m][1]),6,0,7); ctx.stroke();
+    let px=X(VID.rec_temp[t][m][0]), py=Y(VID.rec_temp[t][m][1]);
+    ctx.strokeStyle="#ff5555"; ctx.beginPath();
+    ctx.moveTo(px-7,py);ctx.lineTo(px+7,py);ctx.moveTo(px,py-7);ctx.lineTo(px,py+7);ctx.stroke();
+    let ix=X(VID.rec_indep[t][m][0]), iy=Y(VID.rec_indep[t][m][1]);
+    ctx.strokeStyle="#8a8fb0"; ctx.beginPath();
+    ctx.moveTo(ix-5,iy-5);ctx.lineTo(ix+5,iy+5);ctx.moveTo(ix-5,iy+5);ctx.lineTo(ix+5,iy-5);ctx.stroke();
+  }
+  ctx.fillStyle="#e8eaf6"; ctx.font="12px sans-serif"; ctx.fillText(`кадр ${t+1}/${VID.T}`,8,16);
+}
+function stopPlay(){ if(vidTimer){clearInterval(vidTimer);vidTimer=null;} }
+function startPlay(){ stopPlay(); vidTimer=setInterval(()=>{ let t=(vidT+1)%VID.T; drawVideo(t); $("vidSlider").value=t; },350); }
+async function runVideo(){
+  $("vidRun").disabled=true; $("vidStatus").innerHTML='<span class="spin">Считаю кадры…</span>';
+  await new Promise(r=>setTimeout(r,20));
+  try{
+    const cfg={r:+$("vr").value,T:+$("vT").value,sigma:+$("vsig").value,seed:+$("vseed").value,
+               crossing:$("vcross").checked,K:16,N:64,P:44};
+    VID=JSON.parse(pyodide.globals.get("_run_video")(JSON.stringify(cfg)).toString());
+    vidT=0; $("vidSlider").max=VID.T-1; $("vidSlider").value=0; drawVideo(0); startPlay();
+    $("vidStatus").innerHTML=`кадров ${VID.T}: ошибка трекинга — independent ${VID.mean_indep.toFixed(3)}, <b>temporal ${VID.mean_temp.toFixed(3)}</b>`;
+  }catch(e){ $("vidStatus").textContent="Ошибка: "+e; }
+  $("vidRun").disabled=false;
+}
+$("vidRun").onclick = runVideo;
+$("vidPlay").onclick = () => { vidTimer ? stopPlay() : startPlay(); };
+$("vidSlider").oninput = () => { stopPlay(); drawVideo(+$("vidSlider").value); };
 const PRESETS = {
   gauss:  { kind:"gauss", r:2, L:2, K:10, n:8000, gamma:-4, contam:0 },
   beta:   { kind:"beta",  r:2, L:2, K:10, n:3000, gamma:-4, contam:0 },

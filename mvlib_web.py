@@ -322,3 +322,124 @@ def run_pipeline(cfg_json):
         out["plot"]["grid2"] = gx
     out["theta"] = {"true": tt.reshape(-1).tolist(), "est": th_a.reshape(-1).tolist()}
     return json.dumps(out)
+
+
+# --------------------------------------------------------------------------- #
+# Video mode: moving bodies recovered frame-by-frame by the multiview model
+# --------------------------------------------------------------------------- #
+def _make_video(B, r, T, sigma, seed, crossing=True):
+    p0 = np.array([[0.22, 0.28], [0.78, 0.72], [0.5, 0.2]])[:r]
+    p1 = np.array([[0.30, 0.70], [0.70, 0.28], [0.5, 0.8]])[:r] if crossing else \
+         np.array([[0.62, 0.30], [0.38, 0.70], [0.8, 0.5]])[:r]
+    lam = np.full(r, 1.0 / r)
+    F = np.zeros((T, B.N, B.N))
+    ctr = np.zeros((T, r, 2))
+    for t in range(T):
+        a = t / (T - 1)
+        for m in range(r):
+            c = (1 - a) * p0[m] + a * p1[m]
+            ctr[t, m] = c
+            u = np.exp(-(B.xg - c[0]) ** 2 / (2 * sigma ** 2)) / (sigma * SQRT2PI)
+            v = np.exp(-(B.xg - c[1]) ** 2 / (2 * sigma ** 2)) / (sigma * SQRT2PI)
+            F[t] += lam[m] * np.outer(u, v)
+        F[t] /= F[t].sum() * B.dx * B.dx
+    return F, ctr, lam
+
+
+def _grid_fit(F, B, r, gamma=1e-4, restarts=3, seed=0, init=None):
+    K = B.K
+    Zl = [(B.Psi * (F.sum(1) * B.dx)[:, None]).sum(0) * B.dx,
+          (B.Psi * (F.sum(0) * B.dx)[:, None]).sum(0) * B.dx]
+    Zp = {(0, 1): (B.Psi.T @ F @ B.Psi) * B.dx * B.dx}
+    pairs = [(0, 1)]
+
+    def fg(p):
+        th = p[:2 * r * K].reshape(2, r, K); lam = p[2 * r * K:2 * r * K + r]
+        Gl = [lam @ th[j] for j in range(2)]
+        Gp = np.einsum("m,mk,ml->kl", lam, th[0], th[1])
+        Rl = [Gl[j] - Zl[j] for j in range(2)]; Rp = Gp - Zp[(0, 1)]
+        S = np.zeros((K - 2, K))
+        for i in range(K - 2):
+            S[i, i], S[i, i + 1], S[i, i + 2] = 1.0, -2.0, 1.0
+        val = 0.5 * sum(float(a @ a) for a in Rl) + 0.5 * float((Rp ** 2).sum())
+        if gamma > 0:
+            val += 0.5 * gamma * sum(float(np.sum((S @ th[j].T) ** 2)) for j in range(2))
+        gth = np.zeros((2, r, K)); glm = np.zeros(r)
+        for j in range(2):
+            gth[j] += lam[:, None] * Rl[j][None, :]; glm += th[j] @ Rl[j]
+            if gamma > 0:
+                gth[j] += gamma * (S.T @ (S @ th[j].T)).T
+        gth[0] += lam[:, None] * (th[1] @ Rp.T)
+        gth[1] += lam[:, None] * (th[0] @ Rp)
+        glm += np.einsum("mk,kl,ml->m", th[0], Rp, th[1])
+        return val, np.concatenate([gth.ravel(), glm])
+
+    ts = 2 * r * K
+    ub = np.tile(1.0 / B.C_k, 2 * r)
+    bnds = [(0.0, ub[i]) for i in range(ts)] + [(0.0, 1.0)] * r
+    cons = [{"type": "eq", "fun": lambda p: p[ts:ts + r].sum() - 1.0,
+             "jac": lambda p: np.r_[np.zeros(ts), np.ones(r)]}]
+    rg = np.random.default_rng(seed); best = None
+    starts = []
+    if init is not None:
+        starts.append(init)
+    for _ in range(restarts - len(starts)):
+        starts.append(np.r_[np.clip(np.abs(rg.standard_normal(ts)) * 0.4 + 0.2, 0, ub), np.full(r, 1.0 / r)])
+    for p0 in starts:
+        res = minimize(fg, p0, jac=True, method="SLSQP", bounds=bnds, constraints=cons,
+                       options={"maxiter": 2000, "ftol": 1e-12})
+        if best is None or res.fun < best.fun:
+            best = res
+    th = best.x[:ts].reshape(2, r, K); lam = np.clip(best.x[ts:ts + r], 1e-12, None); lam /= lam.sum()
+    G = (B.Psi.T @ B.Psi) * B.dx; Ginv = np.linalg.pinv(G)
+    coef = np.einsum("ik,jmk->jmi", Ginv, th)
+    u = np.einsum("jmk,nk->jmn", coef, B.Psi); u = np.maximum(u, 0)
+    u /= np.maximum(u.sum(2, keepdims=True) * B.dx, 1e-30)
+    ctr = np.stack([(u[j] * B.xg[None, :]).sum(1) * B.dx for j in range(2)], 1)  # (r,2)
+    return ctr, lam, th, best.x
+
+def run_video(cfg_json):
+    cfg = json.loads(cfg_json)
+    r = int(cfg.get("r", 2)); T = int(cfg.get("T", 12))
+    sigma = float(cfg.get("sigma", 0.055)); seed = int(cfg.get("seed", 0))
+    K = int(cfg.get("K", 16)); N = int(cfg.get("N", 64)); P = int(cfg.get("P", 48))
+    crossing = bool(cfg.get("crossing", True)); gamma = float(cfg.get("gamma", 1e-4))
+    B = Basis(K=K, N=N)
+    F, ctrue, lam = _make_video(B, r, T, sigma, seed, crossing)
+
+    rec_i = np.zeros_like(ctrue); rec_t = np.zeros_like(ctrue)
+    for t in range(T):
+        ctr, lm, th, x = _grid_fit(F[t], B, r, gamma=gamma, restarts=4, seed=t)
+        if t > 0:                      # order components to continue the previous frame
+            C = ((rec_i[t - 1][:, None, :] - ctr[None, :, :]) ** 2).sum(-1)
+            rows, cols = linear_sum_assignment(C)
+            ctr = ctr[cols]
+        rec_i[t] = ctr
+    # temporal repair: outliers vs linear prediction replaced by interpolation
+    thr = 0.5 * sigma
+    rec_t = rec_i.copy()
+    for m in range(r):
+        for t in range(1, T - 1):
+            pred = 0.5 * (rec_i[t - 1, m] + rec_i[t + 1, m])
+            if np.linalg.norm(rec_i[t, m] - pred) > thr:
+                rec_t[t, m] = pred
+    # errors vs truth (match columns)
+    def err(a):
+        e = []
+        for t in range(T):
+            C = ((ctrue[t][:, None, :] - a[t][None, :, :]) ** 2).sum(-1)
+            rows, cols = linear_sum_assignment(C)
+            e.append(np.sqrt(C[rows, cols]).mean())
+        return e
+    ei, et = err(rec_i), err(rec_t)
+    idxs = np.clip(np.round(np.linspace(0, N - 1, P)).astype(int), 0, N - 1)
+    out = {
+        "r": r, "T": T, "P": P, "sigma": sigma,
+        "frames": [F[t][np.ix_(idxs, idxs)].tolist() for t in range(T)],
+        "true": ctrue.tolist(),
+        "rec_indep": rec_i.tolist(),
+        "rec_temp": rec_t.tolist(),
+        "err_indep": ei, "err_temp": et,
+        "mean_indep": float(np.mean(ei)), "mean_temp": float(np.mean(et)),
+    }
+    return json.dumps(out)
