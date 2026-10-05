@@ -137,11 +137,6 @@
       <div id="v3status" class="muted" style="margin:8px 0">3D-видео ещё не запускалось.</div>
       <div class="muted" style="margin-bottom:4px">3D-сцена: тяни мышью, чтобы вращать; колесо — зум</div>
       <canvas id="c3d" width="620" height="440" style="cursor:grab; width:100%; max-width:620px"></canvas>
-      <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:10px">
-        <canvas id="cXY" width="300" height="300"></canvas>
-        <canvas id="cXZ" width="300" height="300"></canvas>
-        <canvas id="cYZ" width="300" height="300"></canvas>
-      </div>
       <input type="range" id="v3slider" min="0" max="0" value="0" style="margin-top:8px" />
     </div>
 
@@ -335,34 +330,7 @@ $("vidPlay").onclick = () => { vidTimer ? stopPlay() : startPlay(); };
 $("vidSlider").oninput = () => { stopPlay(); drawVideo(+$("vidSlider").value); };
 
 let VID3=null, v3t=0, v3timer=null;
-const PLANES=["cXY","cXZ","cYZ"], HVI=[[0,1],[0,2],[1,2]], PLN=["XY","XZ","YZ"];
-function drawVid3d(t){
-  if(!VID3) return; v3t=t;
-  for(let p=0;p<3;p++){
-    const cv=$(PLANES[p]), ctx=cv.getContext("2d"), F=VID3.proj[t][p], n=F.length, Pc=cv.width;
-    const img=ctx.createImageData(n,n); let lo=Infinity,hi=-Infinity;
-    for(let a=0;a<n;a++)for(let b=0;b<n;b++){lo=Math.min(lo,F[a][b]);hi=Math.max(hi,F[a][b]);}
-    for(let j=0;j<n;j++)for(let a=0;a<n;a++){const c=viridis((F[a][n-1-j]-lo)/(hi-lo+1e-12));const k=(j*n+a)*4;
-      img.data[k]=c[0];img.data[k+1]=c[1];img.data[k+2]=c[2];img.data[k+3]=255;}
-    const tmp=document.createElement("canvas");tmp.width=n;tmp.height=n;tmp.getContext("2d").putImageData(img,0,0);
-    ctx.imageSmoothingEnabled=true; ctx.clearRect(0,0,Pc,Pc); ctx.drawImage(tmp,0,0,Pc,Pc);
-    const hi_=HVI[p][0], vi_=HVI[p][1], X=v=>v*Pc, Y=v=>(1-v)*Pc;
-    for(let m=0;m<VID3.r;m++){
-      const col=COLORS[m%COLORS.length];
-      ctx.strokeStyle=col; ctx.lineWidth=2; ctx.setLineDash([]); ctx.globalAlpha=1;
-      ctx.beginPath(); for(let tt=0;tt<VID3.T;tt++){const q=VID3.true[tt][m];const x=X(q[hi_]),y=Y(q[vi_]);tt?ctx.lineTo(x,y):ctx.moveTo(x,y);} ctx.stroke();
-      ctx.strokeStyle=col; ctx.lineWidth=1.5; ctx.setLineDash([4,4]); ctx.globalAlpha=.85;
-      ctx.beginPath(); for(let tt=0;tt<VID3.T;tt++){const q=VID3.rec_temp[tt][m];const x=X(q[hi_]),y=Y(q[vi_]);tt?ctx.lineTo(x,y):ctx.moveTo(x,y);} ctx.stroke();
-      ctx.setLineDash([]); ctx.globalAlpha=1;
-      const qt=VID3.true[t][m], qr=VID3.rec_temp[t][m];
-      ctx.strokeStyle="#ffffff"; ctx.beginPath(); ctx.arc(X(qt[hi_]),Y(qt[vi_]),5,0,7); ctx.stroke();
-      const rx=X(qr[hi_]),ry=Y(qr[vi_]); ctx.strokeStyle="#ff5555"; ctx.beginPath();
-      ctx.moveTo(rx-6,ry);ctx.lineTo(rx+6,ry);ctx.moveTo(rx,ry-6);ctx.lineTo(rx,ry+6);ctx.stroke();
-    }
-    ctx.fillStyle="#e8eaf6"; ctx.font="12px sans-serif"; ctx.fillText(PLN[p]+"  кадр "+(t+1)+"/"+VID3.T,8,16);
-  }
-  draw3D(t);
-}
+function drawVid3d(t){ if(!VID3) return; v3t=t; draw3D(t); }
 let yaw3=-0.7, pitch3=0.5, zoom3=1, drag3=null;
 function proj3(p){
   const x=p[0]-0.5, y=p[1]-0.5, z=p[2]-0.5;

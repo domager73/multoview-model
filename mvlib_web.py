@@ -548,12 +548,6 @@ def run_video3d(cfg_json):
             pred = 0.5 * (rec[t - 1, m] + rec[t + 1, m])
             if np.linalg.norm(rec[t, m] - pred) > 0.6 * sigma:
                 rec_t[t, m] = pred
-    # projected densities per frame (xy, xz, yz), downsampled
-    P = int(cfg.get("P", 32)); ids = np.clip(np.round(np.linspace(0, N - 1, P)).astype(int), 0, N - 1)
-    proj = []
-    for t in range(T):
-        xy = F[t].sum(2); xz = F[t].sum(1); yz = F[t].sum(0)
-        proj.append([xy[np.ix_(ids, ids)].tolist(), xz[np.ix_(ids, ids)].tolist(), yz[np.ix_(ids, ids)].tolist()])
     def err(a):
         e = []
         for t in range(T):
@@ -571,8 +565,8 @@ def run_video3d(cfg_json):
         wt = p[idx] / p[idx].max()
         pts = np.stack([B.xg[ii], B.xg[jj], B.xg[kk], wt], 1).round(4)
         cloud.append(pts.tolist())
-    out = {"r": r, "T": T, "P": P, "true": ctrue.tolist(),
+    out = {"r": r, "T": T, "true": ctrue.tolist(),
            "rec_indep": rec.tolist(), "rec_temp": rec_t.tolist(),
-           "proj": proj, "cloud": cloud, "err_indep": ei, "err_temp": et,
+           "cloud": cloud, "err_indep": ei, "err_temp": et,
            "mean_indep": float(np.mean(ei)), "mean_temp": float(np.mean(et))}
     return json.dumps(out)
