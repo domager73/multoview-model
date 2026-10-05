@@ -276,7 +276,7 @@ function drawVideo(t){
   const cv=$("cVideo"), ctx=cv.getContext("2d"), F=VID.frames[t], n=F.length, P=cv.width;
   const img=ctx.createImageData(n,n); let lo=Infinity,hi=-Infinity;
   for(let i=0;i<n;i++)for(let j=0;j<n;j++){lo=Math.min(lo,F[i][j]);hi=Math.max(hi,F[i][j]);}
-  for(let j=0;j<n;j++)for(let i=0;i<n;i++){const c=viridis((F[i][j]-lo)/(hi-lo+1e-12));const k=(j*n+i)*4;
+  for(let j=0;j<n;j++)for(let i=0;i<n;i++){const c=viridis((F[i][n-1-j]-lo)/(hi-lo+1e-12));const k=(j*n+i)*4;
     img.data[k]=c[0];img.data[k+1]=c[1];img.data[k+2]=c[2];img.data[k+3]=255;}
   const tmp=document.createElement("canvas");tmp.width=n;tmp.height=n;tmp.getContext("2d").putImageData(img,0,0);
   ctx.imageSmoothingEnabled=true; ctx.clearRect(0,0,P,P); ctx.drawImage(tmp,0,0,P,P);
