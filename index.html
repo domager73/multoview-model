@@ -73,6 +73,14 @@
     </div>
     <button id="run" disabled>▶ Считать (моменты / EM / гибрид)</button>
     <button id="reroll" class="sec">🎲 Новая истина (seed+1)</button>
+    <div class="muted" style="margin-top:14px">Пресеты режимов:</div>
+    <div class="row" style="flex-wrap:wrap; gap:6px; margin-top:4px">
+      <button class="sec" style="width:auto;padding:6px 10px;margin:0" data-preset="gauss">верная спецификация</button>
+      <button class="sec" style="width:auto;padding:6px 10px;margin:0" data-preset="beta">бета-скос (наши бьют EM)</button>
+      <button class="sec" style="width:auto;padding:6px 10px;margin:0" data-preset="skewL2">skew L=2 (гибрид)</button>
+      <button class="sec" style="width:auto;padding:6px 10px;margin:0" data-preset="heavy">тяжёлые хвосты</button>
+      <button class="sec" style="width:auto;padding:6px 10px;margin:0" data-preset="r3">тяжело: d=2, r=3</button>
+    </div>
     <div id="status" class="muted" style="margin-top:10px">Загрузка Pyodide…</div>
   </div>
 
@@ -243,6 +251,22 @@ function drawTheta(p){
 
 $("run").onclick = run;
 $("reroll").onclick = () => { $("seed").value = +$("seed").value + 1; run(); };
+
+const PRESETS = {
+  gauss:  { kind:"gauss", r:2, L:2, K:10, n:8000, gamma:-4, contam:0 },
+  beta:   { kind:"beta",  r:2, L:2, K:10, n:3000, gamma:-4, contam:0 },
+  skewL2: { kind:"skew",  r:2, L:2, K:10, n:8000, gamma:-4, contam:0 },
+  heavy:  { kind:"heavy", r:2, L:2, K:10, n:3000, gamma:-4, contam:0 },
+  r3:     { kind:"gauss", r:3, L:2, K:14, n:8000, gamma:-4, contam:0 }
+};
+document.querySelectorAll("[data-preset]").forEach(b => {
+  b.onclick = () => {
+    const p = PRESETS[b.dataset.preset];
+    $("kind").value = p.kind; $("r").value = p.r; $("L").value = p.L; $("K").value = p.K;
+    $("n").value = p.n; $("gamma").value = p.gamma; $("contam").value = p.contam;
+    bindLabels(); run();
+  };
+});
 initPy();
 </script>
 </body>
