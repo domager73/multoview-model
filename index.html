@@ -214,6 +214,7 @@ function render(out){
   for (const k in m) if (m[k].rel_theta < m[best].rel_theta) best = k;
   const tb = $("metrics").querySelector("tbody"); tb.innerHTML = "";
   for (const k of ["baseline","moments","em","hybrid","struct"]){
+    if(!m[k]) continue;
     const tr = document.createElement("tr");
     tr.innerHTML = `<td>${names[k]}</td>
       <td class="${k===best?'best':''}">${fmt(m[k].rel_theta)}</td>

@@ -360,24 +360,25 @@ def run_pipeline(cfg_json):
     results["moments"] = (th_m, lm_m, t_m)
     results["em"] = (th_e, lm_e, t_e)
     results["hybrid"] = (th_h, lm_h, t_h)
-    t0 = time.time()
-    lam_s, w_s, xi_s, var_s = _struct_init(th_m, lm_m, B, d, r, L)
     Hc = []; fs_struct = None
     gv = np.linspace(0, 1, grids); dxg = gv[1] - gv[0]
     ids = np.clip(np.round(gv * (B.N - 1)).astype(int), 0, B.N - 1)
     ft_grid = np.einsum("m,mi,mj->ij", lam, u[0][:, ids], u[1][:, ids])
     Xg = np.column_stack([np.meshgrid(gv, gv, indexing="ij")[0].ravel(),
                           np.meshgrid(gv, gv, indexing="ij")[1].ravel()])
-    fs_struct = _dens_struct(Xg, lam_s, w_s, xi_s, var_s, d, r, L).reshape(grids, grids)
-    Hc.append(_hell(fs_struct, ft_grid, dxg))
-    done = 0
-    for T in [1, 3, 10]:
-        lam_s, w_s, xi_s, var_s = _struct_em(X, lam_s, w_s, xi_s, var_s, d, r, L, T=T - done)
-        done = T
+    if cfg.get("method", "moments") == "struct":
+        t0 = time.time()
+        lam_s, w_s, xi_s, var_s = _struct_init(th_m, lm_m, B, d, r, L)
         fs_struct = _dens_struct(Xg, lam_s, w_s, xi_s, var_s, d, r, L).reshape(grids, grids)
         Hc.append(_hell(fs_struct, ft_grid, dxg))
-    th_s = _struct_theta(lam_s, w_s, xi_s, var_s, B, d, r, L)
-    results["struct"] = (th_s, lam_s, time.time() - t0)
+        done = 0
+        for T in [1, 3, 10]:
+            lam_s, w_s, xi_s, var_s = _struct_em(X, lam_s, w_s, xi_s, var_s, d, r, L, T=T - done)
+            done = T
+            fs_struct = _dens_struct(Xg, lam_s, w_s, xi_s, var_s, d, r, L).reshape(grids, grids)
+            Hc.append(_hell(fs_struct, ft_grid, dxg))
+        th_s = _struct_theta(lam_s, w_s, xi_s, var_s, B, d, r, L)
+        results["struct"] = (th_s, lam_s, time.time() - t0)
     for name, (th, lm, t) in results.items():
         pm = align(tt, lam, th, lm)
         out["metrics"][name] = {
@@ -397,7 +398,8 @@ def run_pipeline(cfg_json):
             ue = np.maximum(ue, 0.0); ue /= np.maximum(ue.sum(2, keepdims=True) * B.dx, 1e-30)
             f_est = np.einsum("m,mi,mj->ij", lm_, ue[0][:, ids], ue[1][:, ids])
         out["metrics"][name]["hell"] = _hell(f_est, ft_grid, dxg)
-    out["hcurve"] = {"T": [0, 1, 3, 10], "H": Hc}
+    if Hc:
+        out["hcurve"] = {"T": [0, 1, 3, 10], "H": Hc}
 
     th, lm, _ = results[cfg.get("method", "moments")]
     pm = align(tt, lam, th, lm)
