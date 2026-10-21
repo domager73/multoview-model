@@ -253,6 +253,85 @@ def rel(a, b):
     return float(np.linalg.norm(a - b) / max(np.linalg.norm(a), 1e-300))
 
 
+
+def _fit_1d_gauss(xg, w, L, iters=120, floor=0.005):
+    w = np.maximum(w, 0); w = w / (w.sum() + 1e-30)
+    cdf = np.cumsum(w); q = (np.arange(L) + 0.5) / L
+    mu = np.interp(q, cdf, xg); var = np.full(L, max(np.var(xg), floor ** 2 * 4)); pi = np.full(L, 1.0 / L)
+    for _ in range(iters):
+        dens = np.array([pi[l] * np.exp(-(xg - mu[l]) ** 2 / (2 * var[l])) / np.sqrt(2 * np.pi * var[l]) for l in range(L)])
+        r = dens / (dens.sum(0) + 1e-300)
+        Nl = (r * w[None, :]).sum(1) + 1e-12; pi = Nl / Nl.sum()
+        mu = (r * w[None, :] * xg[None, :]).sum(1) / Nl
+        var = np.maximum((r * w[None, :] * (xg[None, :] - mu[:, None]) ** 2).sum(1) / Nl, floor ** 2)
+    return pi, mu, var
+
+
+def _struct_init(th, lam, B, d, r, L):
+    w = np.zeros((r, d, L)); xi = np.zeros((r, d, L)); var = np.zeros((r, d, L))
+    for j in range(d):
+        for m in range(r):
+            u = np.maximum(B.Psi @ th[j, m], 0); u = u / (u.sum() * B.dx + 1e-30)
+            pi, mu, v = _fit_1d_gauss(B.xg, u * B.dx, L)
+            o = np.argsort(mu); w[m, j] = pi[o]; xi[m, j] = mu[o]; var[m, j] = v[o]
+    return lam.copy(), w, xi, var
+
+
+def _struct_em(X, lam, w, xi, var, d, r, L, T=10, floor=0.005):
+    from itertools import product as _iprod
+    n = X.shape[0]; states = list(_iprod(range(r), *([range(L)] * d)))
+    for _ in range(T):
+        logq = np.zeros((n, len(states)))
+        for si, st in enumerate(states):
+            m = st[0]; ls = st[1:]; lq = np.log(max(lam[m], 1e-300))
+            for j in range(d):
+                l = ls[j]; s2 = var[m, j, l]
+                lq += np.log(max(w[m, j, l], 1e-300)) - 0.5 * np.log(2 * np.pi * s2) - 0.5 * (X[:, j] - xi[m, j, l]) ** 2 / s2
+            logq[:, si] = lq
+        mx = logq.max(1, keepdims=True); q = np.exp(logq - mx); q /= q.sum(1, keepdims=True) + 1e-300
+        ln = np.zeros(r)
+        for si, st in enumerate(states): ln[st[0]] += q[:, si].sum()
+        lam = ln / ln.sum()
+        for m in range(r):
+            for j in range(d):
+                for l in range(L):
+                    sel = [si for si, st in enumerate(states) if st[0] == m and st[1 + j] == l]
+                    W = q[:, sel].sum() + 1e-12
+                    w[m, j, l] = W; xi[m, j, l] = (q[:, sel].sum(1) @ X[:, j]) / W
+                    var[m, j, l] = max(float((q[:, sel] * (X[:, j:j + 1] - xi[m, j, l]) ** 2).sum() / W), floor ** 2)
+                w[m, j] /= w[m, j].sum()
+    return lam, w, xi, var
+
+
+def _dens_struct(Xg, lam, w, xi, var, d, r, L):
+    f = np.zeros(Xg.shape[0])
+    for m in range(r):
+        g = np.ones(Xg.shape[0])
+        for j in range(d):
+            uj = np.zeros(Xg.shape[0])
+            for l in range(L):
+                uj += w[m, j, l] * np.exp(-(Xg[:, j] - xi[m, j, l]) ** 2 / (2 * var[m, j, l])) / np.sqrt(2 * np.pi * var[m, j, l])
+            g *= uj
+        f += lam[m] * g
+    return f
+
+
+def _struct_theta(lam, w, xi, var, B, d, r, L):
+    P = B.Psi
+    th = np.zeros((d, r, B.K))
+    for j in range(d):
+        for m in range(r):
+            for l in range(L):
+                dens = np.exp(-(B.xg - xi[m, j, l]) ** 2 / (2 * var[m, j, l])) / np.sqrt(2 * np.pi * var[m, j, l])
+                th[j, m] += w[m, j, l] * (dens @ P * B.dx)
+    return th
+
+
+def _hell(f, ft, dx):
+    f = np.maximum(f, 1e-300); ft = np.maximum(ft, 1e-300)
+    return float(np.sqrt(max(0.0, 1 - np.sum(np.sqrt(f * ft)) * dx * dx)))
+
+
 def run_pipeline(cfg_json):
     cfg = json.loads(cfg_json)
     d = int(cfg["d"]); r = int(cfg["r"]); L = int(cfg["L"]); K = int(cfg["K"])
@@ -281,6 +360,24 @@ def run_pipeline(cfg_json):
     results["moments"] = (th_m, lm_m, t_m)
     results["em"] = (th_e, lm_e, t_e)
     results["hybrid"] = (th_h, lm_h, t_h)
+    t0 = time.time()
+    lam_s, w_s, xi_s, var_s = _struct_init(th_m, lm_m, B, d, r, L)
+    Hc = []; fs_struct = None
+    gv = np.linspace(0, 1, grids); dxg = gv[1] - gv[0]
+    ids = np.clip(np.round(gv * (B.N - 1)).astype(int), 0, B.N - 1)
+    ft_grid = np.einsum("m,mi,mj->ij", lam, u[0][:, ids], u[1][:, ids])
+    Xg = np.column_stack([np.meshgrid(gv, gv, indexing="ij")[0].ravel(),
+                          np.meshgrid(gv, gv, indexing="ij")[1].ravel()])
+    fs_struct = _dens_struct(Xg, lam_s, w_s, xi_s, var_s, d, r, L).reshape(grids, grids)
+    Hc.append(_hell(fs_struct, ft_grid, dxg))
+    done = 0
+    for T in [1, 3, 10]:
+        lam_s, w_s, xi_s, var_s = _struct_em(X, lam_s, w_s, xi_s, var_s, d, r, L, T=T - done)
+        done = T
+        fs_struct = _dens_struct(Xg, lam_s, w_s, xi_s, var_s, d, r, L).reshape(grids, grids)
+        Hc.append(_hell(fs_struct, ft_grid, dxg))
+    th_s = _struct_theta(lam_s, w_s, xi_s, var_s, B, d, r, L)
+    results["struct"] = (th_s, lam_s, time.time() - t0)
     for name, (th, lm, t) in results.items():
         pm = align(tt, lam, th, lm)
         out["metrics"][name] = {
@@ -288,6 +385,19 @@ def run_pipeline(cfg_json):
             "rel_lam": rel(lam, lm[pm]),
             "time": t,
         }
+
+    G = (B.Psi.T @ B.Psi) * B.dx
+    Ginv = np.linalg.pinv(G)
+    for name, (th_, lm_, t_) in results.items():
+        if name == "struct":
+            f_est = fs_struct
+        else:
+            coef_ = np.einsum("ik,jmk->jmi", Ginv, th_)
+            ue = np.einsum("jmk,nk->jmn", coef_, B.Psi)
+            ue = np.maximum(ue, 0.0); ue /= np.maximum(ue.sum(2, keepdims=True) * B.dx, 1e-30)
+            f_est = np.einsum("m,mi,mj->ij", lm_, ue[0][:, ids], ue[1][:, ids])
+        out["metrics"][name]["hell"] = _hell(f_est, ft_grid, dxg)
+    out["hcurve"] = {"T": [0, 1, 3, 10], "H": Hc}
 
     th, lm, _ = results[cfg.get("method", "moments")]
     pm = align(tt, lam, th, lm)
@@ -299,10 +409,17 @@ def run_pipeline(cfg_json):
     # because psi_k are L1-normalised (heavily overlapping), not orthonormal.
     G = (B.Psi.T @ B.Psi) * B.dx
     Ginv = np.linalg.pinv(G)
-    coef = np.einsum("ik,jmk->jmi", Ginv, th_a)       # (d,r,K)
-    u_est = np.einsum("jmk,nk->jmn", coef, B.Psi)      # (d,r,N)
-    u_est = np.maximum(u_est, 0.0)
-    u_est /= np.maximum(u_est.sum(2, keepdims=True) * B.dx, 1e-30)
+    if cfg.get("method", "moments") == "struct":
+        u_est = np.zeros((d, r, B.N))
+        for j in range(d):
+            for m in range(r):
+                for l in range(L):
+                    u_est[j, m] += w_s[m, j, l] * np.exp(-(B.xg - xi_s[m, j, l]) ** 2 / (2 * var_s[m, j, l])) / np.sqrt(2 * np.pi * var_s[m, j, l])
+    else:
+        coef = np.einsum("ik,jmk->jmi", Ginv, th_a)       # (d,r,K)
+        u_est = np.einsum("jmk,nk->jmn", coef, B.Psi)      # (d,r,N)
+        u_est = np.maximum(u_est, 0.0)
+        u_est /= np.maximum(u_est.sum(2, keepdims=True) * B.dx, 1e-30)
 
     # downsample everything to `grids` points for the browser
     ids = np.clip(np.round(np.linspace(0, 1, grids) * (B.N - 1)).astype(int), 0, B.N - 1)
@@ -314,6 +431,8 @@ def run_pipeline(cfg_json):
         "lam_true": lam.tolist(),
         "lam_est": lam_a.tolist(),
     }
+    if cfg.get("method", "moments") == "struct":
+        u_est = np.array([[np.interp(B.xg, gv, fs_struct.ravel() if False else fs_struct.ravel()) for m in range(r)] for j in range(d)]) if False else u_est
     if d == 2:
         f_true = np.einsum("m,mi,mj->ij", lam, u[0], u[1])
         f_est = np.einsum("m,mi,mj->ij", lam_a, u_est[0], u_est[1])

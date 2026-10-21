@@ -68,10 +68,10 @@
     <div class="row">
       <div><label>seed данных</label><input type="number" id="seed" value="0" /></div>
       <div><label>метод для графиков</label>
-        <select id="method"><option value="moments">моменты</option><option value="em">EM</option><option value="hybrid">гибрид</option></select>
+        <select id="method"><option value="moments">моменты</option><option value="em">EM</option><option value="hybrid">гибрид</option><option value="struct">structural EM (T=10)</option></select>
       </div>
     </div>
-    <button id="run" disabled>▶ Считать (моменты / EM / гибрид)</button>
+    <button id="run" disabled>▶ Считать (моменты / EM / гибрид / struct)</button>
     <button id="reroll" class="sec">🎲 Новая истина (seed+1)</button>
     <div class="muted" style="margin-top:14px">Пресеты режимов:</div>
     <div class="row" style="flex-wrap:wrap; gap:6px; margin-top:4px">
@@ -87,7 +87,7 @@
   <div>
     <div class="panel" style="margin-bottom:16px">
       <div class="chips" id="info"></div>
-      <table id="metrics"><thead><tr><th>метод</th><th>rel θ</th><th>rel λ</th><th>время, с</th></tr></thead><tbody></tbody></table>
+      <table id="metrics"><thead><tr><th>метод</th><th>rel θ</th><th>rel λ</th><th>Hellinger</th><th>время, с</th></tr></thead><tbody></tbody></table>
       <div class="muted" id="interpret" style="margin-top:8px"></div>
     </div>
 
@@ -102,6 +102,8 @@
         <canvas id="cTrue" width="360" height="360"></canvas>
         <canvas id="cEst" width="360" height="360"></canvas>
       </div>
+      <div class="muted" style="margin-top:10px">Hellinger vs число шагов structural EM</div>
+      <canvas id="cH" width="420" height="200"></canvas>
     </div>
 
     <div class="panel" style="margin-bottom:16px">
@@ -207,15 +209,17 @@ function fmt(x){ return (x<1e3)? x.toFixed(4) : x.toFixed(0); }
 function render(out){
   const m = out.metrics, info = out.info;
   // metrics table
-  const names = {baseline:"моменты γ=0 (старт)", moments:"моменты γ=1e-4", em:"EM обычный", hybrid:"гибрид"};
+  const names = {baseline:"моменты γ=0 (старт)", moments:"моменты γ=1e-4", em:"EM обычный", hybrid:"гибрид", struct:"structural EM (T=10)"};
   let best = "moments";
   for (const k in m) if (m[k].rel_theta < m[best].rel_theta) best = k;
   const tb = $("metrics").querySelector("tbody"); tb.innerHTML = "";
-  for (const k of ["baseline","moments","em","hybrid"]){
+  for (const k of ["baseline","moments","em","hybrid","struct"]){
     const tr = document.createElement("tr");
     tr.innerHTML = `<td>${names[k]}</td>
       <td class="${k===best?'best':''}">${fmt(m[k].rel_theta)}</td>
-      <td>${fmt(m[k].rel_lam)}</td><td>${m[k].time.toFixed(2)}</td>`;
+      <td>${fmt(m[k].rel_lam)}</td>
+      <td class="${m[k].hell===Math.min(...Object.values(m).map(x=>x.hell))?'best':''}">${(m[k].hell??0).toFixed(3)}</td>
+      <td>${m[k].time.toFixed(2)}</td>`;
     tb.appendChild(tr);
   }
   $("info").innerHTML =
@@ -228,6 +232,7 @@ function render(out){
     : `Лучше <b>${names[best]}</b> — как правило, в трудных/негауссовых режимах.`;
 
   drawComponents(out.plot);
+  if (out.hcurve) drawH(out.hcurve);
   if (out.plot.f_true){ $("densPanel").style.display=""; drawHeat("cTrue", out.plot.f_true, out.plot.grid2); drawHeat("cEst", out.plot.f_est, out.plot.grid2); }
   else { $("densPanel").style.display="none"; }
   drawTheta(out.theta);
@@ -296,6 +301,17 @@ $("run").onclick = run;
 $("reroll").onclick = () => { $("seed").value = +$("seed").value + 1; run(); };
 
 let VID=null, vidT=0, vidTimer=null;
+function drawH(h){
+  const c=$("cH"); if(!c) return; const ctx=c.getContext("2d"); const W=c.width,Hh=c.height; ctx.clearRect(0,0,W,Hh);
+  ctx.fillStyle="#f8f8f8"; ctx.fillRect(0,0,W,Hh);
+  const pad=34, xs=h.T, ys=h.H, ymax=Math.max(...ys)*1.1||1;
+  ctx.strokeStyle="#888"; ctx.beginPath(); ctx.moveTo(pad,10); ctx.lineTo(pad,Hh-pad); ctx.lineTo(W-10,Hh-pad); ctx.stroke();
+  ctx.fillStyle="#333"; ctx.font="12px sans-serif"; ctx.fillText("Hellinger",6,14); ctx.fillText("T",W-20,Hh-10);
+  const X=t=>pad+(W-pad-20)*(t/10), Y=v=>Hh-pad-(Hh-pad-20)*(v/ymax);
+  ctx.strokeStyle="#2a6"; ctx.lineWidth=2; ctx.beginPath();
+  h.T.forEach((t,i)=>{ const x=X(t),y=Y(h.H[i]); i?ctx.lineTo(x,y):ctx.moveTo(x,y); }); ctx.stroke();
+  ctx.fillStyle="#2a6"; h.T.forEach((t,i)=>{ const x=X(t),y=Y(h.H[i]); ctx.beginPath(); ctx.arc(x,y,3,0,7); ctx.fill(); ctx.fillText(t,x-4,y-7); });
+}
 function drawVideo(t){
   if(!VID) return; vidT=t;
   const cv=$("cVideo"), ctx=cv.getContext("2d"), F=VID.frames[t], n=F.length, P=cv.width;
