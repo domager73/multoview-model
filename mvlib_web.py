@@ -366,7 +366,7 @@ def run_pipeline(cfg_json):
     ft_grid = np.einsum("m,mi,mj->ij", lam, u[0][:, ids], u[1][:, ids])
     Xg = np.column_stack([np.meshgrid(gv, gv, indexing="ij")[0].ravel(),
                           np.meshgrid(gv, gv, indexing="ij")[1].ravel()])
-    if cfg.get("method", "moments") == "struct":
+    if True:
         t0 = time.time()
         lam_s, w_s, xi_s, var_s = _struct_init(th_m, lm_m, B, d, r, L)
         fs_struct = _dens_struct(Xg, lam_s, w_s, xi_s, var_s, d, r, L).reshape(grids, grids)
