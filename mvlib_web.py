@@ -415,8 +415,9 @@ def run_pipeline(cfg_json):
         u_est = np.zeros((d, r, B.N))
         for j in range(d):
             for m in range(r):
+                mm = pm[m]
                 for l in range(L):
-                    u_est[j, m] += w_s[m, j, l] * np.exp(-(B.xg - xi_s[m, j, l]) ** 2 / (2 * var_s[m, j, l])) / np.sqrt(2 * np.pi * var_s[m, j, l])
+                    u_est[j, m] += w_s[mm, j, l] * np.exp(-(B.xg - xi_s[mm, j, l]) ** 2 / (2 * var_s[mm, j, l])) / np.sqrt(2 * np.pi * var_s[mm, j, l])
     else:
         coef = np.einsum("ik,jmk->jmi", Ginv, th_a)       # (d,r,K)
         u_est = np.einsum("jmk,nk->jmn", coef, B.Psi)      # (d,r,N)
