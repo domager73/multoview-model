@@ -156,7 +156,7 @@
   </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/pyodide/v0.26.2/full/pyodide.js"></script>
+
 <script>
 let pyodide = null;
 const $ = id => document.getElementById(id);
@@ -179,15 +179,47 @@ function cfg(){
   };
 }
 
+function loadPyodideScript(){
+  const bases = [
+    "https://fastly.jsdelivr.net/pyodide/v0.26.2/full/",
+    "https://gcore.jsdelivr.net/pyodide/v0.26.2/full/",
+    "https://cdn.jsdelivr.net/pyodide/v0.26.2/full/"
+  ];
+  return new Promise((resolve, reject) => {
+    let i = 0;
+    const next = () => {
+      if (i >= bases.length) { reject(new Error("CDN Pyodide недоступен")); return; }
+      const base = bases[i++];
+      const sc = document.createElement("script");
+      sc.src = base + "pyodide.js";
+      sc.onload = () => resolve(base);
+      sc.onerror = () => { sc.remove(); next(); };
+      document.head.appendChild(sc);
+    };
+    next();
+  });
+}
+
 async function initPy(){
-  pyodide = await loadPyodide({ indexURL: "https://cdn.jsdelivr.net/pyodide/v0.26.2/full/" });
-  $("status").textContent = "Загрузка numpy/scipy…";
-  await pyodide.loadPackage(["numpy","scipy"]);
-  const src = await (await fetch("mvlib_web.py")).text();
-  pyodide.FS.writeFile("mvlib_web.py", src);
-  await pyodide.runPythonAsync("import mvlib_web\ndef _run(s): return mvlib_web.run_pipeline(s)\ndef _run_video(s): return mvlib_web.run_video(s)\ndef _run_video3d(s): return mvlib_web.run_video3d(s)");
-  $("status").textContent = "Готово. Нажми «Считать».";
-  $("run").disabled = false;
+  $("status").textContent = "Загрузка Pyodide…";
+  try {
+    const base = await loadPyodideScript();
+    pyodide = await loadPyodide({ indexURL: base });
+    $("status").textContent = "Загрузка numpy/scipy…";
+    await pyodide.loadPackage(["numpy","scipy"]);
+    let src;
+    try {
+      src = await (await fetch("mvlib_web.py")).text();
+    } catch (e) {
+      src = await (await fetch("https://raw.githubusercontent.com/domager73/multoview-model/main/mvlib_web.py")).text();
+    }
+    pyodide.FS.writeFile("mvlib_web.py", src);
+    await pyodide.runPythonAsync("import mvlib_web\ndef _run(s): return mvlib_web.run_pipeline(s)\ndef _run_video(s): return mvlib_web.run_video(s)\ndef _run_video3d(s): return mvlib_web.run_video3d(s)");
+    $("status").textContent = "Готово. Нажми «Считать».";
+    $("run").disabled = false;
+  } catch (e) {
+    $("status").textContent = "Ошибка загрузки: " + e.message;
+  }
 }
 
 async function run(){
