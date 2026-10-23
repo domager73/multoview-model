@@ -552,6 +552,23 @@ def run_video(cfg_json):
             pred = 0.5 * (rec_i[t - 1, m] + rec_i[t + 1, m])
             if np.linalg.norm(rec_i[t, m] - pred) > thr:
                 rec_t[t, m] = pred
+    # optional structural EM (T=10) centres
+    rec_s = None
+    if bool(cfg.get("struct", False)):
+        rec_s = np.zeros_like(ctrue)
+        for t in range(T):
+            rg = np.random.default_rng(1000 + t); p = F[t].reshape(-1); p = p / p.sum()
+            idx = rg.choice(p.size, size=min(2500, p.size), p=p)
+            ii, jj = np.unravel_index(idx, F[t].shape)
+            Xs = np.stack([B.xg[ii], B.xg[jj]], 1)
+            ths, lms = moments_theta(Xs, B, r, 2, gamma, 3, t)
+            ls, ws, xs, vs = _struct_init(ths, lms, B, 2, r, 2)
+            ls, ws, xs, vs = _struct_em(Xs, ls, ws, xs, vs, 2, r, 2, T=10)
+            c = np.array([[ (ws[m, j] * xs[m, j]).sum() for j in range(2)] for m in range(r)])
+            if t > 0:
+                C = ((rec_s[t - 1][:, None, :] - c[None, :, :]) ** 2).sum(-1)
+                _, col = linear_sum_assignment(C); c = c[col]
+            rec_s[t] = c
     # errors vs truth (match columns)
     # optional hybrid (moment-init EM) centres
     rec_h = None
@@ -576,6 +593,7 @@ def run_video(cfg_json):
             e.append(np.sqrt(C[rows, cols]).mean())
         return e
     ei, et = err(rec_i), err(rec_t)
+    es = err(rec_s) if rec_s is not None else None
     idxs = np.clip(np.round(np.linspace(0, N - 1, P)).astype(int), 0, N - 1)
     out = {
         "r": r, "T": T, "P": P, "sigma": sigma,
@@ -584,6 +602,9 @@ def run_video(cfg_json):
         "rec_indep": rec_i.tolist(),
         "rec_temp": rec_t.tolist(),
         "rec_hyb": (rec_h.tolist() if rec_h is not None else None),
+        "rec_struct": (rec_s.tolist() if rec_s is not None else None),
+        "err_struct": es,
+        "mean_struct": (float(np.mean(es)) if es is not None else None),
         "err_indep": ei, "err_temp": et,
         "mean_indep": float(np.mean(ei)), "mean_temp": float(np.mean(et)),
     }

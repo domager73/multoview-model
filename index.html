@@ -107,7 +107,7 @@
     </div>
 
     <div class="panel" style="margin-bottom:16px">
-      <div class="muted" style="margin-bottom:6px">Видео: движущиеся тела — ◯ истина · ✚ temporal · ✕ independent</div>
+      <div class="muted" style="margin-bottom:6px">Видео: движущиеся тела — ◯ истина · ✚ temporal · ✕ independent · □ struct</div>
       <div class="row" style="align-items:end; flex-wrap:wrap">
         <div><label>тел r</label><select id="vr"><option>2</option><option>3</option></select></div>
         <div><label>кадров T</label><input type="number" id="vT" value="12" min="6" max="24"></div>
@@ -115,6 +115,7 @@
         <div><label>seed</label><input type="number" id="vseed" value="1"></div>
         <div><label>пересечение</label><input type="checkbox" id="vcross" checked></div>
         <div><label>показать гибрид</label><input type="checkbox" id="vidHyb"></div>
+        <div><label>structural EM</label><input type="checkbox" id="vidStruct"></div>
       </div>
       <div class="row" style="margin-top:8px">
         <button id="vidRun" style="max-width:220px">▶ Запустить видео</button>
@@ -366,6 +367,8 @@ function drawVideo(t){
     ctx.moveTo(ix-5,iy-5);ctx.lineTo(ix+5,iy+5);ctx.moveTo(ix-5,iy+5);ctx.lineTo(ix+5,iy-5);ctx.stroke();
     if(VID.rec_hyb){ let hx=X(VID.rec_hyb[t][m][0]), hy=Y(VID.rec_hyb[t][m][1]);
       ctx.fillStyle="#3ddc97"; ctx.beginPath(); ctx.moveTo(hx,hy-6);ctx.lineTo(hx+6,hy);ctx.lineTo(hx,hy+6);ctx.lineTo(hx-6,hy);ctx.closePath(); ctx.fill(); }
+    if(VID.rec_struct){ let sx=X(VID.rec_struct[t][m][0]), sy=Y(VID.rec_struct[t][m][1]);
+      ctx.strokeStyle="#ffd166"; ctx.lineWidth=2; ctx.strokeRect(sx-5,sy-5,10,10); }
   }
   ctx.fillStyle="#e8eaf6"; ctx.font="12px sans-serif"; ctx.fillText(`кадр ${t+1}/${VID.T}`,8,16);
 }
@@ -376,7 +379,7 @@ async function runVideo(){
   await new Promise(r=>setTimeout(r,20));
   try{
     const cfg={r:+$("vr").value,T:+$("vT").value,sigma:+$("vsig").value,seed:+$("vseed").value,
-               crossing:$("vcross").checked,hybrid:$("vidHyb").checked,K:16,N:64,P:44};
+               crossing:$("vcross").checked,hybrid:$("vidHyb").checked,struct:$("vidStruct").checked,K:16,N:64,P:44};
     VID=JSON.parse(pyodide.globals.get("_run_video")(JSON.stringify(cfg)).toString());
     vidT=0; $("vidSlider").max=VID.T-1; $("vidSlider").value=0; drawVideo(0); startPlay();
     $("vidStatus").innerHTML=`кадров ${VID.T}: ошибка трекинга — independent ${VID.mean_indep.toFixed(3)}, <b>temporal ${VID.mean_temp.toFixed(3)}</b>`;
