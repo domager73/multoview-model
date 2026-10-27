@@ -378,7 +378,7 @@ def run_pipeline(cfg_json):
             fs_struct = _dens_struct(Xg, lam_s, w_s, xi_s, var_s, d, r, L).reshape(grids, grids)
             Hc.append(_hell(fs_struct, ft_grid, dxg))
         th_s = _struct_theta(lam_s, w_s, xi_s, var_s, B, d, r, L)
-        results["struct"] = (th_s, lam_s, time.time() - t0)
+        results["struct"] = (th_s, lam_s, t_m + (time.time() - t0))
     for name, (th, lm, t) in results.items():
         pm = align(tt, lam, th, lm)
         out["metrics"][name] = {
