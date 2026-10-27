@@ -115,7 +115,7 @@
         <div><label>seed</label><input type="number" id="vseed" value="1"></div>
         <div><label>пересечение</label><input type="checkbox" id="vcross" checked></div>
         <div><label>показать гибрид</label><input type="checkbox" id="vidHyb"></div>
-        <div><label>structural EM</label><input type="checkbox" id="vidStruct"></div>
+        <div><label>structural EM</label><input type="checkbox" id="vidStruct" checked></div>
       </div>
       <div class="row" style="margin-top:8px">
         <button id="vidRun" style="max-width:220px">▶ Запустить видео</button>
@@ -134,6 +134,7 @@
         <div><label>кадров T</label><input type="number" id="v3T" value="8" min="5" max="16"></div>
         <div><label>ширина σ</label><input type="range" id="v3sig" min="0.04" max="0.1" step="0.005" value="0.07"></div>
         <div><label>seed</label><input type="number" id="v3seed" value="0"></div>
+        <div><label>structural EM</label><input type="checkbox" id="v3struct" checked></div>
       </div>
       <div class="row" style="margin-top:8px">
         <button id="v3run" style="max-width:240px">▶ Запустить 3D видео</button>
@@ -422,6 +423,10 @@ function draw3D(t){
       ctx.beginPath(); for(let tt=0;tt<VID3.T;tt++){const q=proj3(VID3.true[tt][m]); const x=cx+q[0]*sc,y=cy-q[1]*sc; tt?ctx.lineTo(x,y):ctx.moveTo(x,y);} ctx.stroke();
       ctx.strokeStyle=hexA(col,0.55); ctx.setLineDash([3,3]);
       ctx.beginPath(); for(let tt=0;tt<VID3.T;tt++){const q=proj3(VID3.rec_temp[tt][m]); const x=cx+q[0]*sc,y=cy-q[1]*sc; tt?ctx.lineTo(x,y):ctx.moveTo(x,y);} ctx.stroke();
+      if(VID3.rec_struct){
+        ctx.strokeStyle=hexA(col,0.85); ctx.setLineDash([2,4]); ctx.lineWidth=1.2;
+        ctx.beginPath(); for(let tt=0;tt<VID3.T;tt++){const q=proj3(VID3.rec_struct[tt][m]); const x=cx+q[0]*sc,y=cy-q[1]*sc; tt?ctx.lineTo(x,y):ctx.moveTo(x,y);} ctx.stroke();
+      }
       ctx.setLineDash([]);
     }
   } else {
@@ -443,9 +448,10 @@ function draw3D(t){
     ctx.strokeStyle="#ff5555"; ctx.beginPath(); ctx.moveTo(bx-6,by);ctx.lineTo(bx+6,by);ctx.moveTo(bx,by-6);ctx.lineTo(bx,by+6); ctx.stroke();
     const d=proj3(VID3.rec_indep[t][m]); const dx=cx+d[0]*sc, dy=cy-d[1]*sc;
     ctx.strokeStyle="#9aa0be"; ctx.beginPath(); ctx.moveTo(dx-5,dy-5);ctx.lineTo(dx+5,dy+5);ctx.moveTo(dx-5,dy+5);ctx.lineTo(dx+5,dy-5); ctx.stroke();
+    if(VID3.rec_struct){ const s=proj3(VID3.rec_struct[t][m]); const sx=cx+s[0]*sc, sy=cy-s[1]*sc; ctx.strokeStyle="#6ea8fe"; ctx.strokeRect(sx-5,sy-5,10,10); }
   }
   ctx.fillStyle="#e8eaf6"; ctx.font="12px sans-serif";
-  ctx.fillText("3D-сцена, кадр "+(t+1)+"/"+VID3.T+"   ◯ истина · ✚ temporal · ✕ independent", 8, 16);
+  ctx.fillText("3D-сцена, кадр "+(t+1)+"/"+VID3.T+"   ◯ истина · ✚ temporal · ✕ independent · □ struct", 8, 16);
 }
 const c3=$("c3d");
 c3.addEventListener("mousedown",e=>{drag3={x:e.clientX,y:e.clientY}; c3.style.cursor="grabbing";});
@@ -462,10 +468,10 @@ async function runVideo3d(){
   $("v3run").disabled=true; $("v3status").innerHTML='<span class="spin">Считаю 3D-кадры…</span>';
   await new Promise(r=>setTimeout(r,20));
   try{
-    const cfg={r:+$("v3r").value,T:+$("v3T").value,sigma:+$("v3sig").value,seed:+$("v3seed").value,K:8,N:30,P:28};
+    const cfg={r:+$("v3r").value,T:+$("v3T").value,sigma:+$("v3sig").value,seed:+$("v3seed").value,K:8,N:30,P:28,struct:$("v3struct").checked};
     VID3=JSON.parse(pyodide.globals.get("_run_video3d")(JSON.stringify(cfg)).toString());
     v3t=0; $("v3slider").max=VID3.T-1; $("v3slider").value=0; drawVid3d(0); startVid3d();
-    $("v3status").innerHTML="кадров "+VID3.T+": ошибка трекинга — independent "+VID3.mean_indep.toFixed(3)+", <b>temporal "+VID3.mean_temp.toFixed(3)+"</b>";
+    $("v3status").innerHTML="кадров "+VID3.T+": ошибка трекинга — independent "+VID3.mean_indep.toFixed(3)+", temporal "+VID3.mean_temp.toFixed(3)+(VID3.mean_struct!=null?", <b>struct "+VID3.mean_struct.toFixed(3)+"</b>":"")+"";
   }catch(e){ $("v3status").textContent="Ошибка: "+e; }
   $("v3run").disabled=false;
 }

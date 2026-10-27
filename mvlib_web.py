@@ -555,6 +555,7 @@ def run_video(cfg_json):
     # optional structural EM (T=10) centres
     rec_s = None
     if bool(cfg.get("struct", False)):
+        Ls = int(cfg.get("Lstruct", 1))
         rec_s = np.zeros_like(ctrue)
         for t in range(T):
             rg = np.random.default_rng(1000 + t); p = F[t].reshape(-1); p = p / p.sum()
@@ -720,7 +721,26 @@ def run_video3d(cfg_json):
             C = ((ctrue[t][:, None, :] - a[t][None, :, :]) ** 2).sum(-1)
             rs, cs = linear_sum_assignment(C); e.append(float(np.sqrt(C[rs, cs]).mean()))
         return e
+    # optional structural EM (T=10) centres
+    rec_s = None
+    if bool(cfg.get("struct", False)):
+        Ls = int(cfg.get("Lstruct", 1))
+        rec_s = np.zeros_like(ctrue)
+        for t in range(T):
+            rg = np.random.default_rng(1000 + t); p = F[t].reshape(-1); p = p / p.sum()
+            idx = rg.choice(p.size, size=min(2500, p.size), replace=False, p=p)
+            ii, jj, kk = np.unravel_index(idx, F[t].shape)
+            Xs = np.stack([B.xg[ii], B.xg[jj], B.xg[kk]], 1)
+            ths, lms = moments_theta(Xs, B, r, 3, gamma, 3, t)
+            ls, ws, xs, vs = _struct_init(ths, lms, B, 3, r, Ls)
+            ls, ws, xs, vs = _struct_em(Xs, ls, ws, xs, vs, 3, r, Ls, T=10)
+            c = np.array([[(ws[m, j] * xs[m, j]).sum() for j in range(3)] for m in range(r)])
+            if t > 0:
+                C = ((rec_s[t - 1][:, None, :] - c[None, :, :]) ** 2).sum(-1)
+                _, col = linear_sum_assignment(C); c = c[col]
+            rec_s[t] = c
     ei, et = err(rec), err(rec_t)
+    es = err(rec_s) if rec_s is not None else None
     # 3D point cloud per frame (weighted sample of the voxel density) for volume view
     M = int(cfg.get("M", 650)); rng = np.random.default_rng(7)
     cloud = []
@@ -733,6 +753,9 @@ def run_video3d(cfg_json):
         cloud.append(pts.tolist())
     out = {"r": r, "T": T, "true": ctrue.tolist(),
            "rec_indep": rec.tolist(), "rec_temp": rec_t.tolist(),
+           "rec_struct": (rec_s.tolist() if rec_s is not None else None),
            "cloud": cloud, "err_indep": ei, "err_temp": et,
-           "mean_indep": float(np.mean(ei)), "mean_temp": float(np.mean(et))}
+           "err_struct": es,
+           "mean_indep": float(np.mean(ei)), "mean_temp": float(np.mean(et)),
+           "mean_struct": (float(np.mean(es)) if es is not None else None)}
     return json.dumps(out)
