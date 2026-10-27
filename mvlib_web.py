@@ -398,6 +398,38 @@ def run_pipeline(cfg_json):
             ue = np.maximum(ue, 0.0); ue /= np.maximum(ue.sum(2, keepdims=True) * B.dx, 1e-30)
             f_est = np.einsum("m,mi,mj->ij", lm_, ue[0][:, ids], ue[1][:, ids])
         out["metrics"][name]["hell"] = _hell(f_est, ft_grid, dxg)
+    # parameter errors (component marginal mean/width, Hungarian-aligned)
+    mt = np.zeros((r, d)); vt = np.zeros((r, d))
+    for j in range(d):
+        for m in range(r):
+            w = np.maximum(u[j, m], 0) * B.dx; sw = w.sum() + 1e-30
+            mt[m, j] = (B.xg * w).sum() / sw
+            vt[m, j] = (((B.xg - mt[m, j]) ** 2) * w).sum() / sw
+    vt = np.maximum(vt, 1e-10)
+
+    def _par_err(ms, vs, ls):
+        C = ((ms[:, None, :] - mt[None, :, :]) ** 2).sum(-1) + \
+            ((np.sqrt(vs)[:, None, :] - np.sqrt(vt)[None, :, :]) ** 2).sum(-1) + \
+            (ls[:, None] - lam[None, :]) ** 2
+        _, ci = linear_sum_assignment(C)
+        return (float(np.sqrt(np.mean((ms - mt[ci]) ** 2))),
+                float(np.sqrt(np.mean((np.sqrt(vs) - np.sqrt(vt[ci])) ** 2))))
+
+    for name, (th_, lm_, t_) in results.items():
+        if name == "struct":
+            ms = np.array([[(w_s[m, j] * xi_s[m, j]).sum() for j in range(d)] for m in range(r)])
+            vs = np.array([[(w_s[m, j] * (var_s[m, j] + xi_s[m, j] ** 2)).sum() - ms[m, j] ** 2
+                            for j in range(d)] for m in range(r)])
+            ls = lm_
+        else:
+            ls, XI_, SG_, MU_ = _theta_to_gaussians(th_, lm_, B, L, seed=seed)
+            ms = np.array([[(MU_[j, m] * XI_[j, m]).sum() for j in range(d)] for m in range(r)])
+            vs = np.array([[(MU_[j, m] * (SG_[j, m] ** 2 + XI_[j, m] ** 2)).sum() - ms[m, j] ** 2
+                            for j in range(d)] for m in range(r)])
+        me, we = _par_err(ms, np.maximum(vs, 1e-10), ls)
+        out["metrics"][name]["mean_err"] = me
+        out["metrics"][name]["width_err"] = we
+
     if Hc:
         out["hcurve"] = {"T": [0, 1, 3, 10], "H": Hc}
 

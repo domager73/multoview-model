@@ -87,7 +87,7 @@
   <div>
     <div class="panel" style="margin-bottom:16px">
       <div class="chips" id="info"></div>
-      <table id="metrics"><thead><tr><th>метод</th><th>rel θ</th><th>rel λ</th><th>Hellinger</th><th>время, с</th></tr></thead><tbody></tbody></table>
+      <table id="metrics"><thead><tr><th>метод</th><th>rel θ (mom)</th><th>rel λ</th><th>Hellinger</th><th>mean</th><th>width</th><th>время, с</th></tr></thead><tbody></tbody></table>
       <div class="muted" id="interpret" style="margin-top:8px"></div>
     </div>
 
@@ -246,6 +246,10 @@ function render(out){
   const names = {baseline:"моменты γ=0 (старт)", moments:"моменты γ=1e-4", em:"EM обычный", hybrid:"гибрид", struct:"structural EM (T=10)"};
   let best = "moments";
   for (const k in m) if (m[k].rel_theta < m[best].rel_theta) best = k;
+  const vals = Object.values(m);
+  const bestH = Math.min(...vals.map(x=>x.hell));
+  const bestM = Math.min(...vals.map(x=>x.mean_err));
+  const bestW = Math.min(...vals.map(x=>x.width_err));
   const tb = $("metrics").querySelector("tbody"); tb.innerHTML = "";
   for (const k of ["baseline","moments","em","hybrid","struct"]){
     if(!m[k]) continue;
@@ -253,7 +257,9 @@ function render(out){
     tr.innerHTML = `<td>${names[k]}</td>
       <td class="${k===best?'best':''}">${fmt(m[k].rel_theta)}</td>
       <td>${fmt(m[k].rel_lam)}</td>
-      <td class="${m[k].hell===Math.min(...Object.values(m).map(x=>x.hell))?'best':''}">${(m[k].hell??0).toFixed(3)}</td>
+      <td class="${m[k].hell===bestH?'best':''}">${(m[k].hell??0).toFixed(3)}</td>
+      <td class="${m[k].mean_err===bestM?'best':''}">${(m[k].mean_err??0).toFixed(3)}</td>
+      <td class="${m[k].width_err===bestW?'best':''}">${(m[k].width_err??0).toFixed(3)}</td>
       <td>${m[k].time.toFixed(2)}</td>`;
     tb.appendChild(tr);
   }
